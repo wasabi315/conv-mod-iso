@@ -26,7 +26,9 @@ pattern VVar x = VRigid x SNil
 
 type Env = [Value]
 
-data Quant = Quant Name Value (Value -> Value)
+data VPiArg = VPiArg Name Value (Value -> Value)
+
+data VSigmaArg = VSigmaArg Name Value (Value -> Value)
 
 --------------------------------------------------------------------------------
 

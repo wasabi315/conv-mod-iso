@@ -139,21 +139,21 @@ transportInv i v = case i of
 -- Rewriting types
 
 -- | curry until the first domain becomes non-sigma
-curry :: Quant -> (Quant, Iso)
+curry :: VPiArg -> (VPiArg, Iso)
 curry = go Refl
   where
     go i = \case
-      Quant x (VSigma y a b) c ->
-        go (i <> Curry) $ Quant y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
+      VPiArg x (VSigma y a b) c ->
+        go (i <> Curry) $ VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
       t -> (t, i)
 
 -- | associate until the first projection becomes non-sigma
-assoc :: Quant -> (Quant, Iso)
+assoc :: VSigmaArg -> (VSigmaArg, Iso)
 assoc = go Refl
   where
     go i = \case
-      Quant x (VSigma y a b) c ->
-        go (i <> Assoc) $ Quant y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
+      VSigmaArg x (VSigma y a b) c ->
+        go (i <> Assoc) $ VSigmaArg y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
       t -> (t, i)
 
 dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
@@ -177,12 +177,12 @@ dependsOnLevelsBetween from to = go to
       SSnd sp -> goSpine l sp
 
 -- | Pick a domain without breaking dependencies.
-pickDomain :: Level -> Quant -> [(Quant, Iso)]
-pickDomain l (Quant x a b) = (Quant x a b, Refl) : go l b
+pickDomain :: Level -> VPiArg -> [(VPiArg, Iso)]
+pickDomain l (VPiArg x a b) = (VPiArg x a b, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VPi y c1 c2 ->
-        [ (Quant y c1 rest, s)
+        [ (VPiArg y c1 rest, s)
         | not $ dependsOnLevelsBetween l l' c1,
           let i = l' - l
               rest ~vc1 = VPi x a (instPiAt i vc1 . b)
@@ -201,12 +201,12 @@ pickDomain l (Quant x a b) = (Quant x a b, Refl) : go l b
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
 -- | Pick a projection without breaking dependencies.
-pickProjection :: Level -> Quant -> [(Quant, Iso)]
-pickProjection l (Quant x a b) = (Quant x a b, Refl) : go l b
+pickProjection :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
+pickProjection l (VSigmaArg x a b) = (VSigmaArg x a b, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VSigma y c1 c2 ->
-        [ (Quant y c1 rest, s)
+        [ (VSigmaArg y c1 rest, s)
         | not $ dependsOnLevelsBetween l l' c1,
           let i = l' - l
               rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
@@ -214,7 +214,7 @@ pickProjection l (Quant x a b) = (Quant x a b, Refl) : go l b
         ]
           ++ go (l' + 1) c2
       c ->
-        [ (Quant "_" c rest, s)
+        [ (VSigmaArg "_" c rest, s)
         | not $ dependsOnLevelsBetween l l' c,
           let rest ~_ = dropLastProj (l + 1) (VSigma x a b)
               s = swaps Comm (l' - l)
@@ -237,7 +237,7 @@ pickProjection l (Quant x a b) = (Quant x a b, Refl) : go l b
 
 -- | Pick a **non-sigma** projection without breaking dependencies.
 -- This works even in the presence of arbitrarily nested sigmas in the type.
-assocSwap :: Level -> Quant -> [(Quant, Iso)]
+assocSwap :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
 assocSwap l = go
   where
     go q = do
@@ -246,11 +246,11 @@ assocSwap l = go
       case q of
         -- When the selected projection is a sigma type, we invoke
         -- assocSwap recursively to make the first projection of the sigma non-sigma!
-        Quant x (VSigma y a b) c -> do
-          (Quant y a b, j) <- go (Quant y a b)
+        VSigmaArg x (VSigma y a b) c -> do
+          (VSigmaArg y a b, j) <- go (VSigmaArg y a b)
           let -- Then associate to make the first projection non-sigma.
               -- Don't forget transporting along @j@, since @assocSwap@ acted on the first projection above.
-              q = Quant y a \ ~u -> VSigma x (b u) \ ~v -> c (transportInv j (VPair u v))
+              q = VSigmaArg y a \ ~u -> VSigma x (b u) \ ~v -> c (transportInv j (VPair u v))
               k = i <> sigmaCongL j <> Assoc
           pure (q, k)
         _ -> pure r
@@ -263,13 +263,13 @@ assocSwap l = go
 --            ( (B × A → B) → B → List A → B , ΠSwap · Curry           ),
 --            ( B → (B × A → B) → List A → B , ΠSwap · ΠL Comm · Curry )
 --          ]
-currySwap :: Level -> Quant -> [(Quant, Iso)]
+currySwap :: Level -> VPiArg -> [(VPiArg, Iso)]
 currySwap l q = do
   r@(q, i) <- pickDomain l q
   case q of
-    Quant x (VSigma y a b) c -> do
-      (Quant y a b, j) <- assocSwap l (Quant y a b)
-      let q = Quant y a \ ~u -> VPi x (b u) \ ~v -> c (transportInv j (VPair u v))
+    VPiArg x (VSigma y a b) c -> do
+      (VSigmaArg y a b, j) <- assocSwap l (VSigmaArg y a b)
+      let q = VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (transportInv j (VPair u v))
           k = i <> piCongL j <> Curry
       pure (q, k)
     _ -> pure r
@@ -282,20 +282,20 @@ normalise0 t = normalise 0 (eval [] t)
 
 normalise :: Level -> Value -> (Term, Iso)
 normalise l = \case
-  VPi x a b -> normalisePi l (Quant x a b)
-  VSigma x a b -> normaliseSigma l (Quant x a b)
+  VPi x a b -> normalisePi l (VPiArg x a b)
+  VSigma x a b -> normaliseSigma l (VSigmaArg x a b)
   v -> quote l v // mempty
 
-normalisePi :: Level -> Quant -> (Term, Iso)
+normalisePi :: Level -> VPiArg -> (Term, Iso)
 normalisePi l q = do
-  let (Quant x a b, i) = curry q
+  let (VPiArg x a b, i) = curry q
       (ta, ia) = normalise l a
       (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
   Pi x ta tb // i <> piCongL ia <> piCongR ib
 
-normaliseSigma :: Level -> Quant -> (Term, Iso)
+normaliseSigma :: Level -> VSigmaArg -> (Term, Iso)
 normaliseSigma l q = do
-  let (Quant x a b, i) = assoc q
+  let (VSigmaArg x a b, i) = assoc q
       (ta, ia) = normalise l a
       (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
   Sigma x ta tb // i <> sigmaCongL ia <> sigmaCongR ib
@@ -308,21 +308,21 @@ normalisePermute0 t = normalisePermute 0 (eval [] t)
 
 normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case
-  VPi x a b -> normalisePermutePi l (Quant x a b)
-  VSigma x a b -> normalisePermuteSigma l (Quant x a b)
+  VPi x a b -> normalisePermutePi l (VPiArg x a b)
+  VSigma x a b -> normalisePermuteSigma l (VSigmaArg x a b)
   v -> pure $! quote l v // Refl
 
-normalisePermutePi :: Level -> Quant -> [(Term, Iso)]
+normalisePermutePi :: Level -> VPiArg -> [(Term, Iso)]
 normalisePermutePi l q = do
-  (Quant x a b, i) <- currySwap l q
+  (VPiArg x a b, i) <- currySwap l q
   (a, ia) <- normalisePermute l a
   let v = transportInv ia (VVar l)
   (b, ib) <- normalisePermute (l + 1) (b v)
   pure $! Pi x a b // i <> piCongL ia <> piCongR ib
 
-normalisePermuteSigma :: Level -> Quant -> [(Term, Iso)]
+normalisePermuteSigma :: Level -> VSigmaArg -> [(Term, Iso)]
 normalisePermuteSigma l q = do
-  (Quant x a b, i) <- assocSwap l q
+  (VSigmaArg x a b, i) <- assocSwap l q
   (a, ia) <- normalisePermute l a
   let v = transportInv ia (VVar l)
   (b, ib) <- normalisePermute (l + 1) (b v)
