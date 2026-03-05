@@ -1,0 +1,121 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           conv-mod-iso
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/conv-mod-iso#readme>
+category:       Language
+homepage:       https://github.com/wasabi315/conv-mod-iso#readme
+bug-reports:    https://github.com/wasabi315/conv-mod-iso/issues
+author:         Satoshi Takimoto
+maintainer:     wasabi.nvim.st@gmail.com
+copyright:      2026 Satoshi Takimoto
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/wasabi315/conv-mod-iso
+
+flag dump
+  description: dump core
+  manual: True
+  default: False
+
+flag llvm
+  description: use llvm for codegen
+  manual: True
+  default: False
+
+library
+  exposed-modules:
+      Common
+      ConversionModuloIsomorphism
+      Evaluation
+      Isomorphism
+      Pretty
+      Term
+      Value
+  other-modules:
+      Paths_conv_mod_iso
+  hs-source-dirs:
+      src
+  default-extensions:
+      BlockArguments
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      LambdaCase
+      OverloadedStrings
+      PatternSynonyms
+      Strict
+      ViewPatterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2
+  build-depends:
+      base >=4.7 && <5
+    , deepseq
+    , flat
+    , parallel
+  default-language: GHC2021
+  if flag(dump)
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm
+
+executable conv-mod-iso
+  main-is: Main.hs
+  other-modules:
+      Paths_conv_mod_iso
+  hs-source-dirs:
+      app
+  default-extensions:
+      BlockArguments
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      LambdaCase
+      OverloadedStrings
+      PatternSynonyms
+      Strict
+      ViewPatterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , conv-mod-iso
+  default-language: GHC2021
+  if flag(dump)
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm
+
+test-suite conv-mod-iso-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_conv_mod_iso
+  hs-source-dirs:
+      test
+  default-extensions:
+      BlockArguments
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      LambdaCase
+      OverloadedStrings
+      PatternSynonyms
+      Strict
+      ViewPatterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
+  build-depends:
+      base >=4.7 && <5
+    , conv-mod-iso
+  default-language: GHC2021
+  if flag(dump)
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm

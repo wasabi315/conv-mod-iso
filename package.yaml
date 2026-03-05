@@ -1,0 +1,89 @@
+name: conv-mod-iso
+version: 0.1.0.0
+github: "wasabi315/conv-mod-iso"
+license: MIT
+author: "Satoshi Takimoto"
+maintainer: "wasabi.nvim.st@gmail.com"
+copyright: "2026 Satoshi Takimoto"
+category: "Language"
+description: "Please see the README on GitHub at <https://github.com/githubuser/conv-mod-iso#readme>"
+
+language: GHC2021
+
+flags:
+  dump:
+    description: dump core
+    default: false
+    manual: true
+  llvm:
+    description: use llvm for codegen
+    default: false
+    manual: true
+
+dependencies:
+  - base >= 4.7 && < 5
+
+default-extensions:
+  - BlockArguments
+  - DeriveAnyClass
+  - DerivingStrategies
+  - DerivingVia
+  - LambdaCase
+  - OverloadedStrings
+  - PatternSynonyms
+  - Strict
+  - ViewPatterns
+
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wmissing-export-lists
+  - -Wmissing-home-modules
+  - -Wpartial-fields
+  - -Wredundant-constraints
+  - -Wno-name-shadowing
+  - -O2
+
+when:
+  - condition: flag(dump)
+    ghc-options:
+      - -ddump-simpl
+      - -dsuppress-all
+      - -dno-suppress-type-signatures
+      - -ddump-to-file
+  - condition: flag(llvm)
+    ghc-options:
+      - -fllvm
+
+library:
+  source-dirs: src
+  dependencies:
+    - deepseq
+    - flat
+    - parallel
+
+executables:
+  conv-mod-iso:
+    source-dirs: app
+    main: Main.hs
+    ghc-options:
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts= "-A64M -s -N4"
+    dependencies:
+      - bytestring
+      - conv-mod-iso
+
+tests:
+  conv-mod-iso-test:
+    main: Spec.hs
+    source-dirs: test
+    ghc-options:
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts= "-A64M -s -N4"
+    dependencies:
+      - conv-mod-iso
