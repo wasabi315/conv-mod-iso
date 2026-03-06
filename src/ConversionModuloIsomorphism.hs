@@ -129,7 +129,7 @@ convPi :: Int -> Level -> VPiArg -> VPiArg -> [(Iso, Iso)]
 convPi par l q q' = do
   let (VPiArg _ a b, i) = curry q
       vk = vtyKind a
-  flip (foldMapAParIf (par > 0) rseq) (currySwap' vk l q') \(VPiArg _ a' b', i') -> do
+  flip (concatMapParIf (par > 0) rseq) (currySwap' vk l q') \(VPiArg _ a' b', i') -> do
     (ia, ia') <- convIso (par - 1) l a a'
     let v = transportInv ia (VVar l)
         v' = transportInv ia' (VVar l)
@@ -140,7 +140,7 @@ convSigma :: Int -> Level -> VSigmaArg -> VSigmaArg -> [(Iso, Iso)]
 convSigma par l q q' = do
   let (VSigmaArg _ a b, i) = assoc q
       vk = vtyKind a
-  flip (foldMapAParIf (par > 0) rseq) (assocSwap' vk l q') \(VSigmaArg _ a' b', i') -> do
+  flip (concatMapParIf (par > 0) rseq) (assocSwap' vk l q') \(VSigmaArg _ a' b', i') -> do
     (ia, ia') <- convIso (par - 1) l a a'
     let v = transportInv ia (VVar l)
         v' = transportInv ia' (VVar l)
