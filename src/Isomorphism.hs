@@ -176,9 +176,9 @@ dependsOnLevelsBetween from to = go to
       SFst sp -> goSpine l sp
       SSnd sp -> goSpine l sp
 
--- | Pick a domain without breaking dependencies.
-pickDomain :: Level -> VPiArg -> [(VPiArg, Iso)]
-pickDomain l (VPiArg x a b) = (VPiArg x a b, Refl) : go l b
+-- | Pick up a domain without breaking dependencies.
+pickUpDomain :: Level -> VPiArg -> [(VPiArg, Iso)]
+pickUpDomain l (VPiArg x a b) = (VPiArg x a b, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VPi y c1 c2 ->
@@ -200,9 +200,9 @@ pickDomain l (VPiArg x a b) = (VPiArg x a b, Refl) : go l b
       0 -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
--- | Pick a projection without breaking dependencies.
-pickProjection :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
-pickProjection l (VSigmaArg x a b) = (VSigmaArg x a b, Refl) : go l b
+-- | Pick up a projection without breaking dependencies.
+pickUpProjection :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
+pickUpProjection l (VSigmaArg x a b) = (VSigmaArg x a b, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VSigma y c1 c2 ->
@@ -242,7 +242,7 @@ assocSwap l = go
   where
     go q = do
       -- Pick one projection first.
-      r@(q, i) <- pickProjection l q
+      r@(q, i) <- pickUpProjection l q
       case q of
         -- When the selected projection is a sigma type, we invoke
         -- assocSwap recursively to make the first projection of the sigma non-sigma!
@@ -265,7 +265,7 @@ assocSwap l = go
 --          ]
 currySwap :: Level -> VPiArg -> [(VPiArg, Iso)]
 currySwap l q = do
-  r@(q, i) <- pickDomain l q
+  r@(q, i) <- pickUpDomain l q
   case q of
     VPiArg x (VSigma y a b) c -> do
       (VSigmaArg y a b, j) <- assocSwap l (VSigmaArg y a b)

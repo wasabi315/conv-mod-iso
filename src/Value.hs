@@ -10,10 +10,20 @@ data Value
   = VRigid Level Spine
   | VTop Name Spine
   | VU
-  | VPi Name Value (Value -> Value)
+  | VPi Name VTyp (Value -> VTyp)
   | VLam Name (Value -> Value)
-  | VSigma Name Value (Value -> Value)
+  | VSigma Name VTyp (Value -> VTyp)
   | VPair Value Value
+
+type VTyp = Value
+
+data VTypKind
+  = VKRigid Level
+  | VKTop Name
+  | VKU
+  | VKPi
+  | VKSigma
+  deriving stock (Eq)
 
 data Spine
   = SNil
@@ -36,11 +46,20 @@ infixr 5 -->
 
 infixr 6 ***
 
-(-->) :: Value -> Value -> Value
+(-->) :: VTyp -> VTyp -> VTyp
 a --> b = VPi "_" a \ ~_ -> b
 
-(***) :: Value -> Value -> Value
+(***) :: VTyp -> VTyp -> VTyp
 a *** b = VSigma "_" a \ ~_ -> b
 
 instance IsString Value where
   fromString s = VTop s SNil
+
+vtyKind :: VTyp -> VTypKind
+vtyKind = \case
+  VRigid x _ -> VKRigid x
+  VTop x _ -> VKTop x
+  VU -> VKU
+  VPi {} -> VKPi
+  VSigma {} -> VKSigma
+  _ -> error "impossible"
