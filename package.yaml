@@ -61,6 +61,7 @@ when:
 library:
   source-dirs: src
   dependencies:
+    - containers
     - deepseq
     - flat
     - parallel
