@@ -1,4 +1,4 @@
-module Main (main) where
+module Main (main, compSquareH) where
 
 import Common
 import Control.Exception
