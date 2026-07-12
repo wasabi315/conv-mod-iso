@@ -1,10 +1,12 @@
 module DiscriminationTree where
 
 import Common
+import Control.Applicative
 import Control.Monad
 import Data.Foldable1
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Lazy qualified as M
+import Evaluation
 import Isomorphism
 import Pretty
 import Value
@@ -60,34 +62,57 @@ spineLength = \case
   SFst sp -> 1 + spineLength sp
   SSnd sp -> 1 + spineLength sp
 
--- TODO: eta conversion
+-- TODO: handle cases where value side is eta longer (how?)
 findConv' :: Level -> Value -> Trie a -> (Trie a -> Maybe a) -> Maybe a
-findConv' l v t k = case (v, t) of
-  (_, Leaf {}) -> error "impossible"
-  (VRigid x sp, ts) -> do
-    let len = spineLength sp
-    t <- child (TRigid x len) ts
-    findConvSpine l sp t k
-  (VTop x sp, ts) -> do
-    let len = spineLength sp
-    t <- child (TTop x len) ts
-    findConvSpine l sp t k
-  (VU, ts) -> do
-    t <- child TU ts
+findConv' l v t k = case v of
+  VRigid x sp ->
+    asum
+      [ do
+          let len = spineLength sp
+          t <- child (TRigid x len) t
+          findConvSpine l sp t k,
+        -- trie side is eta longer (function)
+        do
+          t <- child TLam t
+          findConv' (l + 1) (v $$ VVar l) t k,
+        -- trie side is eta longer (pair)
+        do
+          t <- child TPair t
+          findConv' l (vfst v) t \t ->
+            findConv' l (vsnd v) t k
+      ]
+  VTop x sp ->
+    asum
+      [ do
+          let len = spineLength sp
+          t <- child (TTop x len) t
+          findConvSpine l sp t k,
+        -- trie side is eta longer (function)
+        do
+          t <- child TLam t
+          findConv' (l + 1) (v $$ VVar l) t k,
+        -- trie side is eta longer (pair)
+        do
+          t <- child TPair t
+          findConv' l (vfst v) t \t ->
+            findConv' l (vsnd v) t k
+      ]
+  VU -> do
+    t <- child TU t
     k t
-  (VPi _ a b, ts) -> do
-    t <- child TPi ts
+  VPi _ a b -> do
+    t <- child TPi t
     findConv' l a t \t ->
       findConv' (l + 1) (b $ VVar l) t k
-  (VLam _ v, ts) -> do
-    t <- child TLam ts
+  VLam _ v -> do
+    t <- child TLam t
     findConv' (l + 1) (v $ VVar l) t k
-  (VSigma _ a b, ts) -> do
-    t <- child TSigma ts
+  VSigma _ a b -> do
+    t <- child TSigma t
     findConv' l a t \t ->
       findConv' (l + 1) (b $ VVar l) t k
-  (VPair u v, ts) -> do
-    t <- child TPair ts
+  VPair u v -> do
+    t <- child TPair t
     findConv' l u t \t ->
       findConv' l v t k
 
