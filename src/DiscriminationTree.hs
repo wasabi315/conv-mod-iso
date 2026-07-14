@@ -8,7 +8,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Lazy qualified as M
 import Evaluation
 import Isomorphism
-import Pretty
 import Value
 import Prelude hiding (curry, foldr1, lookup)
 
@@ -33,7 +32,7 @@ data Trie a
   = Leaf a
   | One Token ~(Trie a)
   | Node (M.Map Token (Trie a)) -- two or more
-  deriving stock (Show, Functor, Foldable, Traversable)
+  deriving stock (Functor, Foldable, Traversable)
 
 unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
 unionWith f = \cases
@@ -46,14 +45,18 @@ unionWith f = \cases
   (Node ts) (Node ts') -> Node $ M.unionWith (unionWith f) ts ts'
   _ _ -> error "impossible"
 
-unionsWith :: (Foldable1 f) => (a -> a -> a) -> f (Trie a) -> Trie a
-unionsWith f = foldr1 (unionWith f)
+union :: Trie a -> Trie a -> Trie a
+union = unionWith const
+
+unions :: (Foldable1 f) => f (Trie a) -> Trie a
+unions = foldr1 union
 
 child :: Token -> Trie a -> Maybe (Trie a)
 child tok = \case
   Leaf {} -> error "impossible"
   One tok' ch -> ch <$ guard (tok == tok')
   Node ch -> M.lookup tok ch
+{-# INLINE child #-}
 
 spineLength :: Spine -> Int
 spineLength = \case
@@ -62,7 +65,6 @@ spineLength = \case
   SFst sp -> 1 + spineLength sp
   SSnd sp -> 1 + spineLength sp
 
--- TODO: handle cases where value side is eta longer (how?)
 findConv' :: Level -> Value -> Trie a -> (Trie a -> Maybe a) -> Maybe a
 findConv' l v t k = case v of
   VRigid x sp ->
@@ -71,11 +73,11 @@ findConv' l v t k = case v of
           let len = spineLength sp
           t <- child (TRigid x len) t
           findConvSpine l sp t k,
-        -- trie side is eta longer (function)
+        -- eta expand value (function)
         do
           t <- child TLam t
           findConv' (l + 1) (v $$ VVar l) t k,
-        -- trie side is eta longer (pair)
+        -- eta expand value (pair)
         do
           t <- child TPair t
           findConv' l (vfst v) t \t ->
@@ -141,23 +143,23 @@ findConv l v t = findConv' l v t \case
 isoTrie :: Level -> Value -> Trie Iso
 isoTrie l t = isoTrie' l t Leaf
 
-isoTrie' :: Level -> Value -> (Iso -> Trie Iso) -> Trie Iso
+isoTrie' :: Level -> Value -> (Iso -> Trie a) -> Trie a
 isoTrie' l t k = case t of
   VPi x a b -> isoTriePi l (VPiArg x a b) k
   VSigma x a b -> isoTrieSigma l (VSigmaArg x a b) k
   _ -> reflTrie l t (k Refl)
 
-isoTriePi :: Level -> VPiArg -> (Iso -> Trie Iso) -> Trie Iso
+isoTriePi :: Level -> VPiArg -> (Iso -> Trie a) -> Trie a
 isoTriePi l pi k =
-  One TPi $ unionsWith const do
+  One TPi $ unions do
     (VPiArg _ a b, i) <- NE.fromList $ currySwap l pi
     pure $ isoTrie' l a \ia ->
       isoTrie' (l + 1) (b $ transportInv ia (VVar l)) \ib ->
         k $! i <> piCongL ia <> piCongR ib
 
-isoTrieSigma :: Level -> VSigmaArg -> (Iso -> Trie Iso) -> Trie Iso
+isoTrieSigma :: Level -> VSigmaArg -> (Iso -> Trie a) -> Trie a
 isoTrieSigma l sig k =
-  One TSigma $ unionsWith const do
+  One TSigma $ unions do
     (VSigmaArg _ a b, i) <- NE.fromList $ assocSwap l sig
     pure $ isoTrie' l a \ia ->
       isoTrie' (l + 1) (b $ transportInv ia (VVar l)) \ib ->
@@ -165,87 +167,26 @@ isoTrieSigma l sig k =
 
 reflTrie :: Level -> Value -> Trie a -> Trie a
 reflTrie l = \case
-  VRigid x sp -> reflTrieSpine l (TRigid x) sp
-  VTop x sp -> reflTrieSpine l (TTop x) sp
+  VRigid x sp -> etaTrie l (TRigid x) sp
+  VTop x sp -> etaTrie l (TTop x) sp
   VU -> One TU
-  VPi _ a b ->
-    One TPi
-      . reflTrie l a
-      . reflTrie (l + 1) (b $ VVar l)
-  VLam _ t ->
-    One TLam
-      . reflTrie (l + 1) (t $ VVar l)
-  VSigma _ a b ->
-    One TSigma
-      . reflTrie l a
-      . reflTrie (l + 1) (b $ VVar l)
-  VPair t u ->
-    One TPair
-      . reflTrie l t
-      . reflTrie l u
+  VPi _ a b -> One TPi . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
+  VLam _ t -> One TLam . reflTrie (l + 1) (t $ VVar l)
+  VSigma _ a b -> One TSigma . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
+  VPair t u -> One TPair . reflTrie l t . reflTrie l u
+
+-- eta-expand speculatively and infinitely
+etaTrie :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
+etaTrie l hd sp ~t =
+  reflTrieSpine l hd sp t
+    `union` One TLam (etaTrie (l + 1) hd (SApp sp (VVar l)) t)
+    `union` One TPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) t)
 
 reflTrieSpine :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
-reflTrieSpine l hd = \case
-  SNil -> One (hd 0)
-  SApp sp u ->
-    reflTrieSpine l (hd . succ) sp
-      . One TApp
-      . reflTrie l u
-  SFst sp ->
-    reflTrieSpine l (hd . succ) sp
-      . One TFst
-  SSnd sp ->
-    reflTrieSpine l (hd . succ) sp
-      . One TSnd
-
---------------------------------------------------------------------------------
--- Prettyprinting
-
-prettyToken :: Token -> ShowS
-prettyToken = \case
-  TRigid x n -> showString "rigid " . shows x . showString "/" . shows n
-  TTop x n -> showString x . showString "/" . shows n
-  TU -> showString "U"
-  TPi -> showString "Π"
-  TLam -> showString "λ"
-  TSigma -> showString "Σ"
-  TPair -> showString ","
-  TApp -> showString "@"
-  TFst -> showString ".1"
-  TSnd -> showString ".2"
-
-prettyToken0 :: Token -> String
-prettyToken0 t = prettyToken t ""
-
-prettyTrieWith :: (a -> ShowS) -> Trie a -> ShowS
-prettyTrieWith prettyLeaf = go ""
+reflTrieSpine l hd = go 0
   where
-    go indent = \case
-      Leaf x -> showString indent . showString "• " . prettyLeaf x
-      One tok t -> branch indent "└─ " "   " tok t
-      Node ts -> branches indent (M.toAscList ts)
-
-    branches _ [] = id
-    branches indent [(tok, t)] = branch indent "└─ " "   " tok t
-    branches indent ((tok, t) : ts) =
-      branch indent "├─ " "│  " tok t
-        . showChar '\n'
-        . branches indent ts
-
-    branch indent fork next tok t =
-      showString indent
-        . showString fork
-        . prettyToken tok
-        . case t of
-          Leaf x -> showString " -> " . prettyLeaf x
-          One {} -> showChar '\n' . go (indent ++ next) t
-          Node {} -> showChar '\n' . go (indent ++ next) t
-
-prettyTrie :: (Show a) => Trie a -> ShowS
-prettyTrie = prettyTrieWith shows
-
-prettyTrie0 :: (Show a) => Trie a -> String
-prettyTrie0 t = prettyTrie t ""
-
-prettyIsoTrie :: Trie Iso -> String
-prettyIsoTrie t = prettyTrieWith (prettyIso 0) t ""
+    go len = \case
+      SNil -> One (hd len)
+      SApp sp u -> go (len + 1) sp . One TApp . reflTrie l u
+      SFst sp -> go (len + 1) sp . One TFst
+      SSnd sp -> go (len + 1) sp . One TSnd
