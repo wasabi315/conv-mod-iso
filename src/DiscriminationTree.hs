@@ -8,6 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Lazy qualified as M
 import Evaluation
 import Isomorphism
+import Pretty
 import Value
 import Prelude hiding (curry, foldr1, lookup)
 
@@ -29,6 +30,12 @@ data Token
   | TEtaPair
   deriving stock (Eq, Ord, Show)
 
+isEtaToken :: Token -> Bool
+isEtaToken = \case
+  TEtaLam -> True
+  TEtaPair -> True
+  _ -> False
+
 -- Discrimination tree
 data Trie a
   = Leaf a
@@ -36,126 +43,8 @@ data Trie a
   | Node (M.Map Token (Trie a)) -- two or more
   deriving stock (Functor, Foldable, Traversable)
 
-unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
-unionWith f = \cases
-  (Leaf x) (Leaf y) -> Leaf $ f x y
-  (One tok t) (One tok' t')
-    | tok == tok' -> One tok $ unionWith f t t'
-    | otherwise -> Node $ M.fromList [(tok, t), (tok', t')]
-  (One tok t) (Node ts) -> Node $ M.insertWith (unionWith f) tok t ts
-  (Node ts) (One tok t) -> Node $ M.insertWith (flip $ unionWith f) tok t ts
-  (Node ts) (Node ts') -> Node $ M.unionWith (unionWith f) ts ts'
-  _ _ -> error "impossible"
-
-union :: Trie a -> Trie a -> Trie a
-union = unionWith const
-
-unions :: (Foldable1 f) => f (Trie a) -> Trie a
-unions = foldr1 union
-
-child :: Token -> Trie a -> Maybe (Trie a)
-child tok = \case
-  Leaf {} -> error "impossible"
-  One tok' ch -> ch <$ guard (tok == tok')
-  Node ch -> M.lookup tok ch
-{-# INLINE child #-}
-
-spineLength :: Spine -> Int
-spineLength = \case
-  SNil -> 0
-  SApp sp _ -> 1 + spineLength sp
-  SFst sp -> 1 + spineLength sp
-  SSnd sp -> 1 + spineLength sp
-
-findConv' :: Level -> Value -> Trie a -> (Trie a -> Maybe a) -> Maybe a
-findConv' l v t k = case v of
-  VRigid x sp ->
-    asum
-      [ do
-          let len = spineLength sp
-          t <- child (TRigid x len) t
-          findConvSpine l sp t k,
-        -- eta expand value (function)
-        do
-          t <- child TLam t
-          findConv' (l + 1) (v $$ VVar l) t k,
-        -- eta expand value (pair)
-        do
-          t <- child TPair t
-          findConv' l (vfst v) t \t ->
-            findConv' l (vsnd v) t k
-      ]
-  VTop x sp ->
-    asum
-      [ do
-          let len = spineLength sp
-          t <- child (TTop x len) t
-          findConvSpine l sp t k,
-        -- trie side is eta longer (function)
-        do
-          t <- child TLam t
-          findConv' (l + 1) (v $$ VVar l) t k,
-        -- trie side is eta longer (pair)
-        do
-          t <- child TPair t
-          findConv' l (vfst v) t \t ->
-            findConv' l (vsnd v) t k
-      ]
-  VU -> do
-    t <- child TU t
-    k t
-  VPi _ a b -> do
-    t <- child TPi t
-    findConv' l a t \t ->
-      findConv' (l + 1) (b $ VVar l) t k
-  VLam _ v ->
-    asum
-      [ do
-          t <- child TLam t
-          findConv' (l + 1) (v $ VVar l) t k,
-        -- value side is eta longer (function)
-        do
-          t <- child TEtaLam t
-          findConv' (l + 1) (v $ VVar l) t k
-      ]
-  VSigma _ a b -> do
-    t <- child TSigma t
-    findConv' l a t \t ->
-      findConv' (l + 1) (b $ VVar l) t k
-  VPair u v ->
-    asum
-      [ do
-          t <- child TPair t
-          findConv' l u t \t ->
-            findConv' l v t k,
-        -- value side is eta longer (pair)
-        do
-          t <- child TEtaPair t
-          findConv' l u t \t ->
-            findConv' l v t k
-      ]
-
-findConvSpine :: Level -> Spine -> Trie a -> (Trie a -> Maybe a) -> Maybe a
-findConvSpine l sp t k = case sp of
-  SNil -> k t
-  SApp sp u -> findConvSpine l sp t \ts -> do
-    t <- child TApp ts
-    findConv' l u t k
-  SFst sp -> findConvSpine l sp t \ts -> do
-    t <- child TFst ts
-    k t
-  SSnd sp -> findConvSpine l sp t \ts -> do
-    t <- child TSnd ts
-    k t
-
-findConv :: Level -> Value -> Trie a -> Maybe a
-findConv l v t = findConv' l v t \case
-  Leaf x -> Just x
-  One {} -> error "impossible"
-  Node {} -> error "impossible"
-
 --------------------------------------------------------------------------------
--- Saturated discrimination tree
+-- "Saturated" discrimination tree costruction
 
 isoTrie :: Level -> Value -> Trie Iso
 isoTrie l t = isoTrie' l t Leaf
@@ -207,3 +96,183 @@ reflTrieSpine l hd = go 0
       SApp sp u -> go (len + 1) sp . One TApp . reflTrie l u
       SFst sp -> go (len + 1) sp . One TFst
       SSnd sp -> go (len + 1) sp . One TSnd
+
+unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
+unionWith f = \cases
+  (Leaf x) (Leaf y) -> Leaf $ f x y
+  (One tok t) (One tok' t')
+    | tok == tok' -> One tok $ unionWith f t t'
+    | otherwise -> Node $ M.fromList [(tok, t), (tok', t')]
+  (One tok t) (Node ts) -> Node $ M.insertWith (unionWith f) tok t ts
+  (Node ts) (One tok t) -> Node $ M.insertWith (flip $ unionWith f) tok t ts
+  (Node ts) (Node ts') -> Node $ M.unionWith (unionWith f) ts ts'
+  _ _ -> error "impossible"
+
+union :: Trie a -> Trie a -> Trie a
+union = unionWith const
+
+unions :: (Foldable1 f) => f (Trie a) -> Trie a
+unions = foldr1 union
+
+--------------------------------------------------------------------------------
+-- Lookup
+
+child :: Token -> Trie a -> Maybe (Trie a)
+child tok = \case
+  Leaf {} -> error "impossible"
+  One tok' ch -> ch <$ guard (tok == tok')
+  Node ch -> M.lookup tok ch
+{-# INLINE child #-}
+
+spineLength :: Spine -> Int
+spineLength = \case
+  SNil -> 0
+  SApp sp _ -> 1 + spineLength sp
+  SFst sp -> 1 + spineLength sp
+  SSnd sp -> 1 + spineLength sp
+
+findConv' :: Level -> Value -> Trie a -> (Trie a -> Maybe a) -> Maybe a
+findConv' l v t k = case v of
+  VRigid x sp ->
+    asum
+      [ do
+          let len = spineLength sp
+          t <- child (TRigid x len) t
+          findConvSpine l sp t k,
+        -- eta expand value (function)
+        do
+          t <- child TLam t
+          findConv' (l + 1) (v $$ VVar l) t k,
+        -- eta expand value (pair)
+        do
+          t <- child TPair t
+          findConv' l (vfst v) t \t ->
+            findConv' l (vsnd v) t k
+      ]
+  VTop x sp ->
+    asum
+      [ do
+          let len = spineLength sp
+          t <- child (TTop x len) t
+          findConvSpine l sp t k,
+        -- eta expand value (function)
+        do
+          t <- child TLam t
+          findConv' (l + 1) (v $$ VVar l) t k,
+        -- eta expand value (pair)
+        do
+          t <- child TPair t
+          findConv' l (vfst v) t \t ->
+            findConv' l (vsnd v) t k
+      ]
+  VU -> do
+    t <- child TU t
+    k t
+  VPi _ a b -> do
+    t <- child TPi t
+    findConv' l a t \t ->
+      findConv' (l + 1) (b $ VVar l) t k
+  VLam _ v ->
+    asum
+      [ do
+          t <- child TLam t
+          findConv' (l + 1) (v $ VVar l) t k,
+        -- eta expand trie-side (function)
+        do
+          t <- child TEtaLam t
+          findConv' (l + 1) (v $ VVar l) t k
+      ]
+  VSigma _ a b -> do
+    t <- child TSigma t
+    findConv' l a t \t ->
+      findConv' (l + 1) (b $ VVar l) t k
+  VPair u v ->
+    asum
+      [ do
+          t <- child TPair t
+          findConv' l u t \t ->
+            findConv' l v t k,
+        -- eta expand trie-side (pair)
+        do
+          t <- child TEtaPair t
+          findConv' l u t \t ->
+            findConv' l v t k
+      ]
+
+findConvSpine :: Level -> Spine -> Trie a -> (Trie a -> Maybe a) -> Maybe a
+findConvSpine l sp t k = case sp of
+  SNil -> k t
+  SApp sp u -> findConvSpine l sp t \ts -> do
+    t <- child TApp ts
+    findConv' l u t k
+  SFst sp -> findConvSpine l sp t \ts -> do
+    t <- child TFst ts
+    k t
+  SSnd sp -> findConvSpine l sp t \ts -> do
+    t <- child TSnd ts
+    k t
+
+findConv :: Level -> Value -> Trie a -> Maybe a
+findConv l v t = findConv' l v t \case
+  Leaf x -> Just x
+  One {} -> error "impossible"
+  Node {} -> error "impossible"
+
+--------------------------------------------------------------------------------
+-- Prettyprinting
+
+prettyToken :: Token -> ShowS
+prettyToken = \case
+  TRigid x n -> showString "rigid " . shows x . showString "/" . shows n
+  TTop x n -> showString x . showString "/" . shows n
+  TU -> showString "U"
+  TPi -> showString "Π"
+  TLam -> showString "λ"
+  TSigma -> showString "Σ"
+  TPair -> showString ","
+  TApp -> showString "@"
+  TFst -> showString ".1"
+  TSnd -> showString ".2"
+  TEtaLam -> showString "ηλ"
+  TEtaPair -> showString "η,"
+
+prettyToken0 :: Token -> String
+prettyToken0 tok = prettyToken tok ""
+
+prettyTrieWith :: (a -> ShowS) -> Trie a -> ShowS
+prettyTrieWith prettyLeaf = go ""
+  where
+    go indent = \case
+      Leaf x -> showString indent . showString "• " . prettyLeaf x
+      One tok t
+        | isEtaToken tok -> showString indent . showString "∅"
+        | otherwise -> branch indent "└─ " "   " tok t
+      Node ts -> branches indent $ filter (not . isEtaToken . fst) $ M.toAscList ts
+
+    branches indent = \case
+      [] -> showString indent . showString "∅"
+      [(tok, t)] -> branch indent "└─ " "   " tok t
+      (tok, t) : ts ->
+        branch indent "├─ " "│  " tok t
+          . showChar '\n'
+          . branches indent ts
+
+    branch indent fork next tok t =
+      showString indent
+        . showString fork
+        . prettyToken tok
+        . case t of
+          Leaf x -> showString " → " . prettyLeaf x
+          One tok' _
+            | isEtaToken tok' -> showChar '\n' . showString (indent ++ next) . showString "∅"
+          One {} -> showChar '\n' . go (indent ++ next) t
+          Node {} -> showChar '\n' . go (indent ++ next) t
+
+prettyTrie :: (Show a) => Trie a -> ShowS
+prettyTrie = prettyTrieWith shows
+
+prettyTrie0 :: (Show a) => Trie a -> String
+prettyTrie0 t = prettyTrie t ""
+
+prettyIsoTrie :: Trie Iso -> String
+prettyIsoTrie t = prettyTrieWith (prettyIso 0) t ""
