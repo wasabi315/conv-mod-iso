@@ -25,6 +25,8 @@ data Token
   | TApp
   | TFst
   | TSnd
+  | TEtaLam
+  | TEtaPair
   deriving stock (Eq, Ord, Show)
 
 -- Discrimination tree
@@ -106,17 +108,32 @@ findConv' l v t k = case v of
     t <- child TPi t
     findConv' l a t \t ->
       findConv' (l + 1) (b $ VVar l) t k
-  VLam _ v -> do
-    t <- child TLam t
-    findConv' (l + 1) (v $ VVar l) t k
+  VLam _ v ->
+    asum
+      [ do
+          t <- child TLam t
+          findConv' (l + 1) (v $ VVar l) t k,
+        -- value side is eta longer (function)
+        do
+          t <- child TEtaLam t
+          findConv' (l + 1) (v $ VVar l) t k
+      ]
   VSigma _ a b -> do
     t <- child TSigma t
     findConv' l a t \t ->
       findConv' (l + 1) (b $ VVar l) t k
-  VPair u v -> do
-    t <- child TPair t
-    findConv' l u t \t ->
-      findConv' l v t k
+  VPair u v ->
+    asum
+      [ do
+          t <- child TPair t
+          findConv' l u t \t ->
+            findConv' l v t k,
+        -- value side is eta longer (pair)
+        do
+          t <- child TEtaPair t
+          findConv' l u t \t ->
+            findConv' l v t k
+      ]
 
 findConvSpine :: Level -> Spine -> Trie a -> (Trie a -> Maybe a) -> Maybe a
 findConvSpine l sp t k = case sp of
@@ -179,8 +196,8 @@ reflTrie l = \case
 etaTrie :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
 etaTrie l hd sp ~t =
   reflTrieSpine l hd sp t
-    `union` One TLam (etaTrie (l + 1) hd (SApp sp (VVar l)) t)
-    `union` One TPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) t)
+    `union` One TEtaLam (etaTrie (l + 1) hd (SApp sp (VVar l)) t)
+    `union` One TEtaPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) t)
 
 reflTrieSpine :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
 reflTrieSpine l hd = go 0
