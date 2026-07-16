@@ -52,7 +52,10 @@ library
       DerivingVia
       LambdaCase
       OverloadedStrings
+      OverloadedRecordDot
+      OverloadedLabels
       PatternSynonyms
+      RecordWildCards
       Strict
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2
@@ -61,6 +64,8 @@ library
     , containers
     , deepseq
     , flat
+    , generic-lens
+    , microlens-platform
     , parallel
   default-language: GHC2021
   if flag(dump)
@@ -81,7 +86,10 @@ executable conv-mod-iso
       DerivingVia
       LambdaCase
       OverloadedStrings
+      OverloadedRecordDot
+      OverloadedLabels
       PatternSynonyms
+      RecordWildCards
       Strict
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
@@ -89,6 +97,8 @@ executable conv-mod-iso
       base >=4.7 && <5
     , bytestring
     , conv-mod-iso
+    , generic-lens
+    , microlens-platform
   default-language: GHC2021
   if flag(dump)
     ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
@@ -109,13 +119,18 @@ test-suite conv-mod-iso-test
       DerivingVia
       LambdaCase
       OverloadedStrings
+      OverloadedRecordDot
+      OverloadedLabels
       PatternSynonyms
+      RecordWildCards
       Strict
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
   build-depends:
       base >=4.7 && <5
     , conv-mod-iso
+    , generic-lens
+    , microlens-platform
   default-language: GHC2021
   if flag(dump)
     ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file

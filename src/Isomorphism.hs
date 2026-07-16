@@ -1,6 +1,8 @@
 module Isomorphism where
 
 import Common
+import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import Evaluation
 import Term
 import Value
@@ -327,3 +329,90 @@ normalisePermuteSigma l q = do
   let v = transportInv ia (VVar l)
   (b, ib) <- normalisePermute (l + 1) (b v)
   pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
+
+--------------------------------------------------------------------------------
+-- dependency DAG
+
+-- level-indexed
+data DepDag
+  = DDNone
+  | DDPi (IM.IntMap DepDagEntry) -- domains
+  | DDSigma (IM.IntMap DepDagEntry) -- projections (including the final component)
+  deriving stock (Show, Generic)
+
+data DepDagEntry = DepDagEntry
+  { dependents :: IS.IntSet, -- levels
+    nestedDag :: DepDag
+  }
+  deriving stock (Show, Generic)
+
+-- assuming all pis are curried and all sigmas are right associated
+buildDepDag :: Level -> Value -> DepDag
+buildDepDag l = \case
+  VPi x a b -> buildDomainDag l (VPiArg x a b)
+  VSigma x a b -> buildProjDag l (VSigmaArg x a b)
+  _ -> DDNone
+
+buildDomainDag :: Level -> VPiArg -> DepDag
+buildDomainDag l = \(VPiArg _ a b) ->
+  DDPi $ go (l + 1) (b $ VVar l) $ insertDomain l a mempty
+  where
+    go l' = \case
+      VPi _ a b -> go (l' + 1) (b $ VVar l') . insertDomain l' a
+      _ -> id
+
+    insertDomain l' a es =
+      IM.insert (coerce l') e $
+        IS.foldl' insertDependent es $
+          levelsBetween l l' a
+      where
+        e = DepDagEntry {dependents = mempty, nestedDag = buildDepDag l' a}
+
+        insertDependent (es :: IM.IntMap DepDagEntry) d =
+          es
+            & (at d . traverse . #dependents)
+            %~ IS.insert (coerce l')
+
+buildProjDag :: Level -> VSigmaArg -> DepDag
+buildProjDag l = \(VSigmaArg _ a b) ->
+  DDSigma $ go (l + 1) (b $ VVar l) $ insertProj l a mempty
+  where
+    go l' = \case
+      VSigma _ a b -> go (l' + 1) (b $ VVar l') . insertProj l' a
+      a -> insertProj l' a
+
+    insertProj l' a es =
+      IM.insert (coerce l') e $
+        IS.foldl' insertDependent es $
+          levelsBetween l l' a
+      where
+        e = DepDagEntry {dependents = mempty, nestedDag = buildDepDag l' a}
+
+        insertDependent (es :: IM.IntMap DepDagEntry) d =
+          es
+            & (at d . traverse . #dependents)
+            %~ IS.insert (coerce l')
+
+-- | Free levels in @[from, to)@. The value is scoped at @to@.
+levelsBetween :: Level -> Level -> Value -> IS.IntSet
+levelsBetween from to = go to
+  where
+    go l = \case
+      VRigid x sp ->
+        ( if from <= x && x < to
+            then IS.singleton (coerce x)
+            else mempty
+        )
+          <> goSpine l sp
+      VTop _ sp -> goSpine l sp
+      VU -> mempty
+      VPi _ a b -> go l a <> go (l + 1) (b $ VVar l)
+      VLam _ t -> go (l + 1) (t $ VVar l)
+      VSigma _ a b -> go l a <> go (l + 1) (b $ VVar l)
+      VPair t u -> go l t <> go l u
+
+    goSpine l = \case
+      SNil -> mempty
+      SApp sp u -> goSpine l sp <> go l u
+      SFst sp -> goSpine l sp
+      SSnd sp -> goSpine l sp

@@ -1,16 +1,23 @@
 module Common
   ( module Common,
-    module Flat,
     module Control.Parallel.Strategies,
+    module Lens.Micro.Platform,
     coerce,
     force,
+    Flat,
+    flat,
+    unflat,
+    Generic,
   )
 where
 
 import Control.DeepSeq
 import Control.Parallel.Strategies
 import Data.Coerce
+import Data.Generics.Labels ()
+import Data.Ix
 import Flat
+import Lens.Micro.Platform
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -36,8 +43,8 @@ type Name = String
 
 newtype Index = Index Int
   deriving stock (Generic)
-  deriving newtype (Show, Ord, Eq, Num)
+  deriving newtype (Show, Ord, Eq, Num, Ix)
   deriving anyclass (NFData, Flat)
 
 newtype Level = Level Int
-  deriving newtype (Eq, Ord, Num, Show)
+  deriving newtype (Eq, Ord, Num, Show, Ix)
