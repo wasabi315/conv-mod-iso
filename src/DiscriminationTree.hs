@@ -140,7 +140,29 @@ spineLength = \case
   SSnd sp -> 1 + spineLength sp
 
 findConv :: Level -> Value -> Trie a -> [a]
-findConv l v dt = extract <$!> findConv' l v dt
+findConv l v dt = extract <$> findConv' l v dt
+
+findConvIso :: Level -> Value -> Trie Iso -> [Iso]
+findConvIso l v dt =
+  findConvIso' l v dt <&> \(dt, j) -> extract dt <> sym j
+
+findConvIso' :: Level -> Value -> Trie a -> [(Trie a, Iso)]
+findConvIso' l v dt = case v of
+  VPi x a b -> do
+    dt <- maybeToList $ child TPi dt
+    let (VPiArg _ a' b', i) = curry (VPiArg x a b)
+    (dt, ia) <- findConvIso' l a' dt
+    let v = transportInv ia (VVar l)
+    (dt, ib) <- findConvIso' (l + 1) (b' v) dt
+    pure $! dt // i <> piCongL ia <> piCongR ib
+  VSigma x a b -> do
+    dt <- maybeToList $ child TSigma dt
+    let (VSigmaArg _ a' b', i) = assoc (VSigmaArg x a b)
+    (dt, ia) <- findConvIso' l a' dt
+    let v = transportInv ia (VVar l)
+    (dt, ib) <- findConvIso' (l + 1) (b' v) dt
+    pure $! dt // i <> sigmaCongL ia <> sigmaCongR ib
+  v -> (,Refl) <$> findConv' l v dt
 
 findConv' :: Level -> Value -> Trie a -> [Trie a]
 findConv' l v dt = case v of

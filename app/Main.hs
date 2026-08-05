@@ -41,8 +41,7 @@ main =
       (_, t) <- timed do
         let dt = isoTrie 0 (eval [] compSquareH)
         for_ ts \t -> do
-          let (t', _) = normalise0 t
-          case findConv 0 (eval [] t') dt of
+          case findConvIso 0 (eval [] t) dt of
             _ : _ -> pure ()
             [] -> error "bug in isoTrie/findConv"
       print t
@@ -52,8 +51,7 @@ main =
       (_, t) <- timed do
         let dt = isoTrie 0 (eval [] compSquareV)
         for_ ts \t -> do
-          let (t', _) = normalise0 t
-          case findConv 0 (eval [] t') dt of
+          case findConvIso 0 (eval [] t) dt of
             [] -> pure ()
             _ : _ -> error "bug in isoTrie/findConv"
       print t
