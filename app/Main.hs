@@ -43,8 +43,8 @@ main =
         for_ ts \t -> do
           let (t', _) = normalise0 t
           case findConv 0 (eval [] t') dt of
-            Just _ -> pure ()
-            Nothing -> error "bug in isoTrie/findConv"
+            _ : _ -> pure ()
+            [] -> error "bug in isoTrie/findConv"
       print t
     ["bench4"] -> do
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
@@ -54,8 +54,8 @@ main =
         for_ ts \t -> do
           let (t', _) = normalise0 t
           case findConv 0 (eval [] t') dt of
-            Nothing -> pure ()
-            Just _ -> error "bug in isoTrie/findConv"
+            [] -> pure ()
+            _ : _ -> error "bug in isoTrie/findConv"
       print t
     _ -> error "invalid argument"
 

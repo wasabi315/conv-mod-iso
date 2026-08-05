@@ -1,3 +1,5 @@
+{-# LANGUAGE OrPatterns #-}
+
 module DiscriminationTree where
 
 import Common
@@ -6,6 +8,7 @@ import Control.Monad
 import Data.Foldable1
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Lazy qualified as M
+import Data.Maybe
 import Evaluation
 import Isomorphism
 import Pretty
@@ -42,6 +45,11 @@ data Trie a
   | One Token ~(Trie a)
   | Node (M.Map Token (Trie a)) -- two or more
   deriving stock (Functor, Foldable, Traversable)
+
+extract :: Trie a -> a
+extract = \case
+  Leaf x -> x
+  One {}; Node {} -> error "extract"
 
 --------------------------------------------------------------------------------
 -- "Saturated" discrimination tree costruction
@@ -83,10 +91,10 @@ reflTrie l = \case
 
 -- eta-expand speculatively and infinitely
 etaTrie :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
-etaTrie l hd sp ~t =
-  reflTrieSpine l hd sp t
-    `union` One TEtaLam (etaTrie (l + 1) hd (SApp sp (VVar l)) t)
-    `union` One TEtaPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) t)
+etaTrie l hd sp ~dt =
+  reflTrieSpine l hd sp dt
+    `union` One TEtaLam (etaTrie (l + 1) hd (SApp sp (VVar l)) dt)
+    `union` One TEtaPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) dt)
 
 reflTrieSpine :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
 reflTrieSpine l hd = go 0
@@ -131,92 +139,77 @@ spineLength = \case
   SFst sp -> 1 + spineLength sp
   SSnd sp -> 1 + spineLength sp
 
-findConv' :: Level -> Value -> Trie a -> (Trie a -> Maybe a) -> Maybe a
-findConv' l v t k = case v of
+findConv :: Level -> Value -> Trie a -> [a]
+findConv l v dt = extract <$!> findConv' l v dt
+
+findConv' :: Level -> Value -> Trie a -> [Trie a]
+findConv' l v dt = case v of
   VRigid x sp ->
-    asum
+    concat
       [ do
           let len = spineLength sp
-          t <- child (TRigid x len) t
-          findConvSpine l sp t k,
+          dt <- maybeToList $ child (TRigid x len) dt
+          findConvSpine l sp dt,
         -- eta expand value (function)
         do
-          t <- child TLam t
-          findConv' (l + 1) (v $$ VVar l) t k,
+          dt <- maybeToList $ child TLam dt
+          findConv' (l + 1) (v $$ VVar l) dt,
         -- eta expand value (pair)
         do
-          t <- child TPair t
-          findConv' l (vfst v) t \t ->
-            findConv' l (vsnd v) t k
+          dt <- maybeToList $ child TPair dt
+          dt <- findConv' l (vfst v) dt
+          findConv' l (vsnd v) dt
       ]
   VTop x sp ->
-    asum
+    concat
       [ do
           let len = spineLength sp
-          t <- child (TTop x len) t
-          findConvSpine l sp t k,
+          dt <- maybeToList $ child (TTop x len) dt
+          findConvSpine l sp dt,
         -- eta expand value (function)
         do
-          t <- child TLam t
-          findConv' (l + 1) (v $$ VVar l) t k,
+          dt <- maybeToList $ child TLam dt
+          findConv' (l + 1) (v $$ VVar l) dt,
         -- eta expand value (pair)
         do
-          t <- child TPair t
-          findConv' l (vfst v) t \t ->
-            findConv' l (vsnd v) t k
+          dt <- maybeToList $ child TPair dt
+          dt <- findConv' l (vfst v) dt
+          findConv' l (vsnd v) dt
       ]
-  VU -> do
-    t <- child TU t
-    k t
+  VU -> maybeToList $ child TU dt
   VPi _ a b -> do
-    t <- child TPi t
-    findConv' l a t \t ->
-      findConv' (l + 1) (b $ VVar l) t k
-  VLam _ v ->
-    asum
-      [ do
-          t <- child TLam t
-          findConv' (l + 1) (v $ VVar l) t k,
-        -- eta expand trie-side (function)
-        do
-          t <- child TEtaLam t
-          findConv' (l + 1) (v $ VVar l) t k
-      ]
+    dt <- maybeToList $ child TPi dt
+    dt <- findConv' l a dt
+    findConv' (l + 1) (b $ VVar l) dt
+  VLam _ v -> do
+    -- eta expand trie-side (function)
+    tok <- [TLam, TEtaLam]
+    dt <- maybeToList $ child tok dt
+    findConv' (l + 1) (v $ VVar l) dt
   VSigma _ a b -> do
-    t <- child TSigma t
-    findConv' l a t \t ->
-      findConv' (l + 1) (b $ VVar l) t k
-  VPair u v ->
-    asum
-      [ do
-          t <- child TPair t
-          findConv' l u t \t ->
-            findConv' l v t k,
-        -- eta expand trie-side (pair)
-        do
-          t <- child TEtaPair t
-          findConv' l u t \t ->
-            findConv' l v t k
-      ]
+    dt <- maybeToList $ child TPi dt
+    dt <- findConv' l a dt
+    findConv' (l + 1) (b $ VVar l) dt
+  VPair t u -> do
+    -- eta expand trie-side (pair)
+    tok <- [TPair, TEtaPair]
+    dt <- maybeToList $ child tok dt
+    dt <- findConv' l t dt
+    findConv' l u dt
 
-findConvSpine :: Level -> Spine -> Trie a -> (Trie a -> Maybe a) -> Maybe a
-findConvSpine l sp t k = case sp of
-  SNil -> k t
-  SApp sp u -> findConvSpine l sp t \ts -> do
-    t <- child TApp ts
-    findConv' l u t k
-  SFst sp -> findConvSpine l sp t \ts -> do
-    t <- child TFst ts
-    k t
-  SSnd sp -> findConvSpine l sp t \ts -> do
-    t <- child TSnd ts
-    k t
-
-findConv :: Level -> Value -> Trie a -> Maybe a
-findConv l v t = findConv' l v t \case
-  Leaf x -> Just x
-  One {} -> error "impossible"
-  Node {} -> error "impossible"
+findConvSpine :: Level -> Spine -> Trie a -> [Trie a]
+findConvSpine l sp dt = case sp of
+  SNil -> [dt]
+  SApp sp u -> do
+    dt <- findConvSpine l sp dt
+    dt <- maybeToList $ child TApp dt
+    findConv' l u dt
+  SFst sp -> do
+    dt <- findConvSpine l sp dt
+    maybeToList $ child TFst dt
+  SSnd sp -> do
+    dt <- findConvSpine l sp dt
+    maybeToList $ child TSnd dt
 
 --------------------------------------------------------------------------------
 -- Prettyprinting
