@@ -24,6 +24,7 @@ dependencies:
   - base >= 4.7 && < 5
   - microlens-platform
   - generic-lens
+  - time
 
 default-extensions:
   - BlockArguments
@@ -76,9 +77,10 @@ executables:
     source-dirs: app
     main: Main.hs
     ghc-options:
-      - -threaded
+      # - -threaded
       - -rtsopts
-      - -with-rtsopts= "-A64M -s -N4"
+      # - -with-rtsopts= "-A64M -s -N4"
+      - -with-rtsopts= "-A64M"
     dependencies:
       - bytestring
       - conv-mod-iso
