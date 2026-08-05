@@ -209,7 +209,7 @@ findConv' l v dt = case v of
     dt <- maybeToList $ child tok dt
     findConv' (l + 1) (v $ VVar l) dt
   VSigma _ a b -> do
-    dt <- maybeToList $ child TPi dt
+    dt <- maybeToList $ child TSigma dt
     dt <- findConv' l a dt
     findConv' (l + 1) (b $ VVar l) dt
   VPair t u -> do
