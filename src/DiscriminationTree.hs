@@ -5,15 +5,18 @@ module DiscriminationTree where
 import Common
 import Control.Applicative
 import Control.Monad
+import Data.Foldable
 import Data.Foldable1
 import Data.List.NonEmpty qualified as NE
-import Data.Map.Lazy qualified as M
 import Data.Maybe
+import Data.Monoid
+import Data.Primitive.SmallArray
 import Evaluation
+import GHC.IsList
 import Isomorphism
 import Pretty
 import Value
-import Prelude hiding (curry, foldr1, lookup)
+import Prelude hiding (curry, lookup)
 
 --------------------------------------------------------------------------------
 
@@ -35,15 +38,14 @@ data Token
 
 isEtaToken :: Token -> Bool
 isEtaToken = \case
-  TEtaLam -> True
-  TEtaPair -> True
+  TEtaLam; TEtaPair -> True
   _ -> False
 
 -- Discrimination tree
 data Trie a
   = Leaf a
   | One Token ~(Trie a)
-  | Node (M.Map Token (Trie a)) -- two or more
+  | Node (SmallArray (Token, Trie a)) -- sorted unique tokens, two or more
   deriving stock (Functor, Foldable, Traversable)
 
 extract :: Trie a -> a
@@ -105,22 +107,68 @@ reflTrieSpine l hd = go 0
       SFst sp -> go (len + 1) sp . One TFst
       SSnd sp -> go (len + 1) sp . One TSnd
 
-unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
-unionWith f = \cases
-  (Leaf x) (Leaf y) -> Leaf $ f x y
-  (One tok t) (One tok' t')
-    | tok == tok' -> One tok $ unionWith f t t'
-    | otherwise -> Node $ M.fromList [(tok, t), (tok', t')]
-  (One tok t) (Node ts) -> Node $ M.insertWith (unionWith f) tok t ts
-  (Node ts) (One tok t) -> Node $ M.insertWith (flip $ unionWith f) tok t ts
-  (Node ts) (Node ts') -> Node $ M.unionWith (unionWith f) ts ts'
-  _ _ -> error "impossible"
+unions :: NE.NonEmpty (Trie a) -> Trie a
+unions = foldl1' union
 
 union :: Trie a -> Trie a -> Trie a
 union = unionWith const
 
-unions :: (Foldable1 f) => f (Trie a) -> Trie a
-unions = foldr1 union
+unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
+unionWith f = go
+  where
+    go = \cases
+      (Leaf x) (Leaf y) -> Leaf $ f x y
+      (One tok t) (One tok' t') -> case compare tok tok' of
+        LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
+        EQ -> One tok $ go t t'
+        GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
+      (One tok t) (Node ts) -> Node $ insertWith go tok t ts
+      (Node ts) (One tok t) -> Node $ insertWith (flip go) tok t ts
+      (Node ts) (Node ts') -> Node $ mergeWith go ts ts'
+      _ _ -> error "impossible"
+
+insertWith :: (a -> a -> a) -> Token -> a -> SmallArray (Token, a) -> SmallArray (Token, a)
+insertWith f tok ~x xs = go 0
+  where
+    sz = sizeofSmallArray xs
+
+    go i
+      | i == sz = createSmallArray (sz + 1) (tok, x) \ys ->
+          copySmallArray ys 0 xs 0 i
+      | (tok', y) <- indexSmallArray xs i = case compare tok tok' of
+          LT -> createSmallArray (sz + 1) (tok, x) \ys -> do
+            copySmallArray ys 0 xs 0 i
+            copySmallArray ys (i + 1) xs i (sz - i)
+          EQ -> runSmallArray do
+            xs <- thawSmallArray xs 0 sz
+            writeSmallArray xs i (tok, f x y)
+            pure xs
+          GT -> go (i + 1)
+
+mergeWith :: (a -> a -> a) -> SmallArray (Token, a) -> SmallArray (Token, a) -> SmallArray (Token, a)
+mergeWith f xs ys = runSmallArray do
+  zs <- newSmallArray cap undefined
+  go zs 0 0 0
+  pure zs
+  where
+    sz = sizeofSmallArray xs
+    sz' = sizeofSmallArray ys
+    cap = sz + sz'
+
+    go zs i j k
+      | i == sz = do
+          copySmallArray zs k ys j (sz' - j)
+          shrinkSmallMutableArray zs (k + sz' - j)
+      | j == sz' = do
+          copySmallArray zs k xs i (sz - i)
+          shrinkSmallMutableArray zs (k + sz - i)
+      | otherwise = do
+          let p@(tok, t) = indexSmallArray xs i
+              p'@(tok', t') = indexSmallArray ys j
+          case compare tok tok' of
+            LT -> writeSmallArray zs k p >> go zs (i + 1) j (k + 1)
+            EQ -> writeSmallArray zs k (tok, f t t') >> go zs (i + 1) (j + 1) (k + 1)
+            GT -> writeSmallArray zs k p' >> go zs i (j + 1) (k + 1)
 
 --------------------------------------------------------------------------------
 -- Lookup
@@ -129,7 +177,7 @@ child :: Token -> Trie a -> Maybe (Trie a)
 child tok = \case
   Leaf {} -> error "impossible"
   One tok' ch -> ch <$ guard (tok == tok')
-  Node ch -> M.lookup tok ch
+  Node ch -> coerce $ foldMap (\(tok', x) -> First $ x <$ guard (tok == tok')) ch
 {-# INLINE child #-}
 
 spineLength :: Spine -> Int
@@ -262,7 +310,7 @@ prettyTrieWith prettyLeaf = go ""
       One tok t
         | isEtaToken tok -> showString indent . showString "∅"
         | otherwise -> branch indent "└─ " "   " tok t
-      Node ts -> branches indent $ filter (not . isEtaToken . fst) $ M.toAscList ts
+      Node ts -> branches indent $ filter (not . isEtaToken . fst) $ GHC.IsList.toList ts
 
     branches indent = \case
       [] -> showString indent . showString "∅"

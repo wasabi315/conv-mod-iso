@@ -67,6 +67,7 @@ library
     , generic-lens
     , microlens-platform
     , parallel
+    , primitive
     , time
   default-language: GHC2021
   if flag(dump)
@@ -100,6 +101,7 @@ executable conv-mod-iso
     , conv-mod-iso
     , generic-lens
     , microlens-platform
+    , primitive
     , time
   default-language: GHC2021
   if flag(dump)
@@ -133,6 +135,7 @@ test-suite conv-mod-iso-test
     , conv-mod-iso
     , generic-lens
     , microlens-platform
+    , primitive
     , time
   default-language: GHC2021
   if flag(dump)
