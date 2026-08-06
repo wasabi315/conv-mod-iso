@@ -1,4 +1,6 @@
+{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE OrPatterns #-}
+{-# LANGUAGE UnboxedTuples #-}
 
 module DiscriminationTree where
 
@@ -111,64 +113,64 @@ unions :: NE.NonEmpty (Trie a) -> Trie a
 unions = foldl1' union
 
 union :: Trie a -> Trie a -> Trie a
-union = unionWith const
-
-unionWith :: (a -> a -> a) -> Trie a -> Trie a -> Trie a
-unionWith f = go
-  where
-    go = \cases
-      (Leaf x) (Leaf y) -> Leaf $ f x y
-      (One tok t) (One tok' t') -> case compare tok tok' of
-        LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
-        EQ -> One tok $ go t t'
-        GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
-      (One tok t) (Node ts) -> Node $ insertWith go tok t ts
-      (Node ts) (One tok t) -> Node $ insertWith (flip go) tok t ts
-      (Node ts) (Node ts') -> Node $ mergeWith go ts ts'
-      _ _ -> error "impossible"
+union = \cases
+  t@(Leaf _) ~_ -> t
+  (One tok t) (One tok' t') -> case compare tok tok' of
+    LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
+    EQ -> One tok $ union t t'
+    GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
+  (One tok t) (Node ts) -> Node $ insertWith union tok t ts
+  (Node ts) (One tok t) -> Node $ insertWith (flip union) tok t ts
+  (Node ts) (Node ts') -> Node $ mergeWith union ts ts'
+  _ _ -> error "impossible"
 
 insertWith :: (a -> a -> a) -> Token -> a -> SmallArray (Token, a) -> SmallArray (Token, a)
-insertWith f tok ~x xs = go 0
-  where
-    sz = sizeofSmallArray xs
-
-    go i
-      | i == sz = createSmallArray (sz + 1) (tok, x) \ys ->
-          copySmallArray ys 0 xs 0 i
-      | (tok', y) <- indexSmallArray xs i = case compare tok tok' of
-          LT -> createSmallArray (sz + 1) (tok, x) \ys -> do
+insertWith f tok ~x xs = runSmallArray do
+  let sz = sizeofSmallArray xs
+      go i
+        | i == sz = do
+            ys <- newSmallArray (sz + 1) (tok, x)
             copySmallArray ys 0 xs 0 i
-            copySmallArray ys (i + 1) xs i (sz - i)
-          EQ -> runSmallArray do
-            xs <- thawSmallArray xs 0 sz
-            writeSmallArray xs i (tok, f x y)
-            pure xs
-          GT -> go (i + 1)
+            pure ys
+        | (# (tok', y) #) <- indexSmallArray## xs i =
+            case compare tok tok' of
+              LT -> do
+                ys <- newSmallArray (sz + 1) (tok, x)
+                copySmallArray ys 0 xs 0 i
+                copySmallArray ys (i + 1) xs i (sz - i)
+                pure ys
+              EQ -> do
+                xs <- thawSmallArray xs 0 sz
+                writeSmallArray xs i (tok, f x y)
+                pure xs
+              GT -> go (i + 1)
+
+  go 0
+{-# INLINE insertWith #-}
 
 mergeWith :: (a -> a -> a) -> SmallArray (Token, a) -> SmallArray (Token, a) -> SmallArray (Token, a)
 mergeWith f xs ys = runSmallArray do
-  zs <- newSmallArray cap undefined
-  go zs 0 0 0
-  pure zs
-  where
-    sz = sizeofSmallArray xs
-    sz' = sizeofSmallArray ys
-    cap = sz + sz'
+  let sz = sizeofSmallArray xs
+      sz' = sizeofSmallArray ys
+  zs <- newSmallArray (sz + sz') undefined
 
-    go zs i j k
-      | i == sz = do
-          copySmallArray zs k ys j (sz' - j)
-          shrinkSmallMutableArray zs (k + sz' - j)
-      | j == sz' = do
-          copySmallArray zs k xs i (sz - i)
-          shrinkSmallMutableArray zs (k + sz - i)
-      | otherwise = do
-          let p@(tok, t) = indexSmallArray xs i
-              p'@(tok', t') = indexSmallArray ys j
-          case compare tok tok' of
-            LT -> writeSmallArray zs k p >> go zs (i + 1) j (k + 1)
-            EQ -> writeSmallArray zs k (tok, f t t') >> go zs (i + 1) (j + 1) (k + 1)
-            GT -> writeSmallArray zs k p' >> go zs i (j + 1) (k + 1)
+  let go i j k
+        | i == sz = do
+            copySmallArray zs k ys j (sz' - j)
+            shrinkSmallMutableArray zs (k + sz' - j)
+        | j == sz' = do
+            copySmallArray zs k xs i (sz - i)
+            shrinkSmallMutableArray zs (k + sz - i)
+        | (# p@(tok, t) #) <- indexSmallArray## xs i,
+          (# p'@(tok', t') #) <- indexSmallArray## ys j =
+            case compare tok tok' of
+              LT -> writeSmallArray zs k p >> go (i + 1) j (k + 1)
+              EQ -> writeSmallArray zs k (tok, f t t') >> go (i + 1) (j + 1) (k + 1)
+              GT -> writeSmallArray zs k p' >> go i (j + 1) (k + 1)
+
+  go 0 0 0
+  pure zs
+{-# INLINE mergeWith #-}
 
 --------------------------------------------------------------------------------
 -- Lookup
