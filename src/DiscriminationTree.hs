@@ -85,26 +85,40 @@ isoTrieSigma l sig k =
 
 reflTrie :: Level -> Value -> Trie a -> Trie a
 reflTrie l = \case
-  VRigid x sp -> etaTrie l (TRigid x) sp
-  VTop x sp -> etaTrie l (TTop x) sp
+  VRigid x sp -> etaTrie l (HRigid x) sp
+  VTop x sp -> etaTrie l (HTop x) sp
   VU -> One TU
   VPi _ a b -> One TPi . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
   VLam _ t -> One TLam . reflTrie (l + 1) (t $ VVar l)
   VSigma _ a b -> One TSigma . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
   VPair t u -> One TPair . reflTrie l t . reflTrie l u
 
--- eta-expand speculatively and infinitely
-etaTrie :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
-etaTrie l hd sp ~dt =
-  reflTrieSpine l hd sp dt
-    `union` One TEtaLam (etaTrie (l + 1) hd (SApp sp (VVar l)) dt)
-    `union` One TEtaPair (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) dt)
+data Head
+  = HRigid Level
+  | HTop Name
 
-reflTrieSpine :: Level -> (Int -> Token) -> Spine -> Trie a -> Trie a
+headToken :: Head -> Int -> Token
+headToken = \cases
+  (HRigid x) len -> TRigid x len
+  (HTop x) len -> TTop x len
+
+-- eta-expand speculatively and infinitely
+etaTrie :: Level -> Head -> Spine -> Trie a -> Trie a
+etaTrie l hd sp ~dt = do
+  let br = reflTrieSpine l hd sp dt
+  Node $
+    smallArrayFromListN
+      3
+      [ br,
+        (TEtaLam, etaTrie (l + 1) hd (SApp sp (VVar l)) dt),
+        (TEtaPair, etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) dt)
+      ]
+
+reflTrieSpine :: Level -> Head -> Spine -> Trie a -> (Token, Trie a)
 reflTrieSpine l hd = go 0
   where
     go len = \case
-      SNil -> One (hd len)
+      SNil -> (,) $! headToken hd len
       SApp sp u -> go (len + 1) sp . One TApp . reflTrie l u
       SFst sp -> go (len + 1) sp . One TFst
       SSnd sp -> go (len + 1) sp . One TSnd
