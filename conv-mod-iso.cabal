@@ -38,6 +38,7 @@ library
       DiscriminationTree
       Evaluation
       Isomorphism
+      PiGenerator
       Pretty
       Term
       Value
@@ -51,12 +52,16 @@ library
       DerivingStrategies
       DerivingVia
       LambdaCase
+      MagicHash
+      NoFieldSelectors
+      OrPatterns
       OverloadedStrings
       OverloadedRecordDot
       OverloadedLabels
       PatternSynonyms
       RecordWildCards
       Strict
+      UnboxedTuples
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2
   build-depends:
@@ -87,14 +92,18 @@ executable conv-mod-iso
       DerivingStrategies
       DerivingVia
       LambdaCase
+      MagicHash
+      NoFieldSelectors
+      OrPatterns
       OverloadedStrings
       OverloadedRecordDot
       OverloadedLabels
       PatternSynonyms
       RecordWildCards
       Strict
+      UnboxedTuples
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -rtsopts -with-rtsopts= "-A64M"
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -rtsopts -with-rtsopts= "-A128M"
   build-depends:
       base >=4.7 && <5
     , bytestring
@@ -122,12 +131,16 @@ test-suite conv-mod-iso-test
       DerivingStrategies
       DerivingVia
       LambdaCase
+      MagicHash
+      NoFieldSelectors
+      OrPatterns
       OverloadedStrings
       OverloadedRecordDot
       OverloadedLabels
       PatternSynonyms
       RecordWildCards
       Strict
+      UnboxedTuples
       ViewPatterns
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
   build-depends:

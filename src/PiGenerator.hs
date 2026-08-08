@@ -1,0 +1,109 @@
+module PiGenerator
+  ( PiGen,
+    initPiGen,
+    domChoices,
+    DomChoice (..),
+  )
+where
+
+import Common
+import Data.Bits
+import Data.IntSet qualified as IS
+import Data.Primitive.SmallArray
+import Isomorphism
+import Value
+
+--------------------------------------------------------------------------------
+-- Generator of all dependency-respecting orders of a Pi telescope's domains
+
+data PiGen = PiGen
+  { original :: {-# UNPACK #-} VPiArg,
+    -- dependency mask per original position
+    depMasks :: {-# UNPACK #-} SmallArray Int,
+    -- mask of not-yet-emitted positions
+    remaining :: Int,
+    -- substitution per original position, placeholder elsewhere
+    subst :: {-# UNPACK #-} SmallArray Value
+  }
+
+data DomChoice = DomChoice
+  { name :: Name,
+    dom :: VTyp,
+    iso :: Iso,
+    residual :: Value -> VTyp,
+    next :: Maybe (Value -> PiGen)
+  }
+
+initPiGen :: Level -> VPiArg -> PiGen
+initPiGen l (VPiArg x a b) = do
+  let deps = smallArrayFromList $ 0 : depMasks (l + 1) (b $ VVar l)
+  PiGen
+    { original = VPiArg x a b,
+      depMasks = deps,
+      remaining = (1 `unsafeShiftL` sizeofSmallArray deps) - 1,
+      subst = runSmallArray (newSmallArray (sizeofSmallArray deps) placeholder)
+    }
+  where
+    depMasks l' = \case
+      VPi _ a b -> do
+        let mask = depMask l' a
+        mask : depMasks (l' + 1) (b $ VVar l')
+      _ -> []
+
+    depMask l' =
+      IS.foldl'
+        (\mask x -> setBit mask (x - coerce l))
+        (0 :: Int)
+        . levelsBetween l l'
+
+domChoices :: PiGen -> [DomChoice]
+domChoices PiGen {..} =
+  [ DomChoice {..}
+  | let tele = currentTele original subst,
+    i <- [0 .. sizeofSmallArray depMasks - 1],
+    testBit remaining i,
+    (indexSmallArray depMasks i .&. remaining) == 0,
+    let (!name, !dom) = indexSmallArray tele i
+        remaining' = clearBit remaining i
+        iso = swaps $ popCount (remaining .&. (bit i - 1))
+        residual ~v = do
+          let subst' = updateSmallArray i v subst
+          residualType original subst' remaining'
+        next
+          | remaining' == 0 = Nothing
+          | otherwise = Just \ ~v -> do
+              let subst' = updateSmallArray i v subst
+              PiGen {remaining = remaining', subst = subst', ..}
+  ]
+{-# INLINE domChoices #-}
+
+-- a domain is valid iff its dependencies have already been emitted
+currentTele :: VPiArg -> SmallArray Value -> SmallArray (Name, VTyp)
+currentTele (VPiArg x a b) subst = mapAccumSmallArrayL_ step (VPi x a b) subst
+  where
+    step (VPi x a b) v = (b v, (x, a))
+    step _ _ = error "impossible"
+{-# INLINE currentTele #-}
+
+-- current residual type
+residualType :: VPiArg -> SmallArray Value -> Int -> VTyp
+residualType (VPiArg x a b) subst rem =
+  foldr step id [0 .. sizeofSmallArray subst - 1] (VPi x a b)
+  where
+    step i k = \case
+      VPi y a b
+        | testBit rem i -> VPi y a \ ~v -> k (b v)
+        | (# v #) <- indexSmallArray## subst i -> k (b v)
+      _ -> error "impossible"
+{-# INLINE residualType #-}
+
+swaps :: Int -> Iso
+swaps 0 = Refl
+swaps n = go (n - 1)
+  where
+    go 0 = PiSwap
+    go n = PiCongR (go (n - 1)) `Trans` PiSwap
+{-# INLINE swaps #-}
+
+placeholder :: Value
+placeholder = VVar (-1)

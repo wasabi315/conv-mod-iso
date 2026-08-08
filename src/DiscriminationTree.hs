@@ -1,21 +1,15 @@
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE OrPatterns #-}
-{-# LANGUAGE UnboxedTuples #-}
-
 module DiscriminationTree where
 
 import Common
 import Control.Applicative
 import Control.Monad
 import Data.Foldable
-import Data.Foldable1
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Monoid
 import Data.Primitive.SmallArray
 import Evaluation
-import GHC.IsList
 import Isomorphism
+import PiGenerator
 import Pretty
 import Value
 import Prelude hiding (curry, lookup)
@@ -25,7 +19,7 @@ import Prelude hiding (curry, lookup)
 -- Tokens
 data Token
   = TRigid Level Int -- spine length
-  | TTop Name Int -- spine length
+  | TTop Int Name -- spine length first: derived Eq/Ord check the cheap Int before the Name
   | TU
   | TPi
   | TLam
@@ -46,6 +40,7 @@ isEtaToken = \case
 -- Discrimination tree
 data Trie a
   = Leaf a
+  | Empty
   | One Token ~(Trie a)
   | Node (SmallArray (Token, Trie a)) -- sorted unique tokens, two or more
   deriving stock (Functor, Foldable, Traversable)
@@ -53,7 +48,29 @@ data Trie a
 extract :: Trie a -> a
 extract = \case
   Leaf x -> x
-  One {}; Node {} -> error "extract"
+  Empty; One {}; Node {} -> error "extract"
+
+instance Semigroup (Trie a) where
+  (<>) = union
+  {-# INLINE (<>) #-}
+
+instance Monoid (Trie a) where
+  mempty = Empty
+  {-# INLINE mempty #-}
+
+union :: Trie a -> Trie a -> Trie a
+union = \cases
+  t@(Leaf _) ~_ -> t
+  Empty t@(One {}; Node {}) -> t
+  t@(One {}; Node {}) Empty -> t
+  (One tok t) (One tok' t') -> case compare tok tok' of
+    LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
+    EQ -> One tok $ union t t'
+    GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
+  (One tok t) (Node ts) -> Node $ insertSmallArrayWith union tok t ts
+  (Node ts) (One tok t) -> Node $ insertSmallArrayWith (flip union) tok t ts
+  (Node ts) (Node ts') -> Node $ mergeSmallArrayWith union ts ts'
+  _ _ -> error "impossible"
 
 --------------------------------------------------------------------------------
 -- "Saturated" discrimination tree costruction
@@ -68,30 +85,56 @@ isoTrie' l t k = case t of
   _ -> reflTrie l t (k Refl)
 
 isoTriePi :: Level -> VPiArg -> (Iso -> Trie a) -> Trie a
-isoTriePi l pi k =
-  One TPi $ unions do
-    (VPiArg _ a b, i) <- NE.fromList $ currySwap l pi
-    pure $ isoTrie' l a \ia ->
-      isoTrie' (l + 1) (b $ transportInv ia (VVar l)) \ib ->
-        k $! i <> piCongL ia <> piCongR ib
+isoTriePi l pi k = isoTriePiGen l (initPiGen l pi) k
+
+isoTriePiGen :: Level -> PiGen -> (Iso -> Trie a) -> Trie a
+isoTriePiGen l gen k =
+  One TPi do
+    flip foldMap'' (domChoices gen) \DomChoice {..} -> case dom of
+      VSigma y a1 a2 ->
+        flip foldMap'' (assocSwap l (VSigmaArg y a1 a2)) \(VSigmaArg _ a1 a2, j) -> do
+          let i' = iso <> piCongL j <> Curry
+          isoTrie' l a1 \ia -> do
+            let ~u = transportInv ia (VVar l)
+                pi = VPiArg name (a2 u) \ ~v -> residual (transportInv j (VPair u v))
+            -- do isoTriePi from the start if dom is sigma
+            isoTriePi (l + 1) pi \ib ->
+              k $! i' <> piCongL ia <> piCongR ib
+      a -> isoTrie' l a \ia -> do
+        let ~u = transportInv ia (VVar l)
+            sub ib = k $! iso <> piCongL ia <> piCongR ib
+        case next of
+          Nothing -> isoTrie' (l + 1) (residual u) sub
+          Just gen' -> isoTriePiGen (l + 1) (gen' u) sub
 
 isoTrieSigma :: Level -> VSigmaArg -> (Iso -> Trie a) -> Trie a
 isoTrieSigma l sig k =
-  One TSigma $ unions do
-    (VSigmaArg _ a b, i) <- NE.fromList $ assocSwap l sig
-    pure $ isoTrie' l a \ia ->
-      isoTrie' (l + 1) (b $ transportInv ia (VVar l)) \ib ->
-        k $! i <> sigmaCongL ia <> sigmaCongR ib
+  One TSigma do
+    flip foldMap'' (assocSwap l sig) \(VSigmaArg _ a b, i) ->
+      isoTrie' l a \ia ->
+        isoTrie' (l + 1) (b $ transportInv ia (VVar l)) \ib ->
+          k $! i <> sigmaCongL ia <> sigmaCongR ib
 
 reflTrie :: Level -> Value -> Trie a -> Trie a
-reflTrie l = \case
-  VRigid x sp -> etaTrie l (HRigid x) sp
-  VTop x sp -> etaTrie l (HTop x) sp
-  VU -> One TU
-  VPi _ a b -> One TPi . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
-  VLam _ t -> One TLam . reflTrie (l + 1) (t $ VVar l)
-  VSigma _ a b -> One TSigma . reflTrie l a . reflTrie (l + 1) (b $ VVar l)
-  VPair t u -> One TPair . reflTrie l t . reflTrie l u
+reflTrie l v ~dt = case v of
+  VRigid x sp -> etaTrie l (HRigid x) sp dt
+  VTop x sp -> etaTrie l (HTop x) sp dt
+  VU -> One TU dt
+  VPi _ a b ->
+    One TPi do
+      reflTrie l a do
+        reflTrie (l + 1) (b $ VVar l) dt
+  VLam _ t ->
+    One TLam do
+      reflTrie (l + 1) (t $ VVar l) dt
+  VSigma _ a b ->
+    One TSigma do
+      reflTrie l a do
+        reflTrie (l + 1) (b $ VVar l) dt
+  VPair t u ->
+    One TPair do
+      reflTrie l t do
+        reflTrie l u dt
 
 data Head
   = HRigid Level
@@ -100,7 +143,7 @@ data Head
 headToken :: Head -> Int -> Token
 headToken = \cases
   (HRigid x) len -> TRigid x len
-  (HTop x) len -> TTop x len
+  (HTop x) len -> TTop len x
 
 -- eta-expand speculatively and infinitely
 etaTrie :: Level -> Head -> Spine -> Trie a -> Trie a
@@ -117,74 +160,11 @@ etaTrie l hd sp ~dt = do
 reflTrieSpine :: Level -> Head -> Spine -> Trie a -> (Token, Trie a)
 reflTrieSpine l hd = go 0
   where
-    go len = \case
-      SNil -> (,) $! headToken hd len
-      SApp sp u -> go (len + 1) sp . One TApp . reflTrie l u
-      SFst sp -> go (len + 1) sp . One TFst
-      SSnd sp -> go (len + 1) sp . One TSnd
-
-unions :: NE.NonEmpty (Trie a) -> Trie a
-unions = foldl1' union
-
-union :: Trie a -> Trie a -> Trie a
-union = \cases
-  t@(Leaf _) ~_ -> t
-  (One tok t) (One tok' t') -> case compare tok tok' of
-    LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
-    EQ -> One tok $ union t t'
-    GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
-  (One tok t) (Node ts) -> Node $ insertWith union tok t ts
-  (Node ts) (One tok t) -> Node $ insertWith (flip union) tok t ts
-  (Node ts) (Node ts') -> Node $ mergeWith union ts ts'
-  _ _ -> error "impossible"
-
-insertWith :: (a -> a -> a) -> Token -> a -> SmallArray (Token, a) -> SmallArray (Token, a)
-insertWith f tok ~x xs = runSmallArray do
-  let sz = sizeofSmallArray xs
-      go i
-        | i == sz = do
-            ys <- newSmallArray (sz + 1) (tok, x)
-            copySmallArray ys 0 xs 0 i
-            pure ys
-        | (# (tok', y) #) <- indexSmallArray## xs i =
-            case compare tok tok' of
-              LT -> do
-                ys <- newSmallArray (sz + 1) (tok, x)
-                copySmallArray ys 0 xs 0 i
-                copySmallArray ys (i + 1) xs i (sz - i)
-                pure ys
-              EQ -> do
-                xs <- thawSmallArray xs 0 sz
-                writeSmallArray xs i (tok, f x y)
-                pure xs
-              GT -> go (i + 1)
-
-  go 0
-{-# INLINE insertWith #-}
-
-mergeWith :: (a -> a -> a) -> SmallArray (Token, a) -> SmallArray (Token, a) -> SmallArray (Token, a)
-mergeWith f xs ys = runSmallArray do
-  let sz = sizeofSmallArray xs
-      sz' = sizeofSmallArray ys
-  zs <- newSmallArray (sz + sz') undefined
-
-  let go i j k
-        | i == sz = do
-            copySmallArray zs k ys j (sz' - j)
-            shrinkSmallMutableArray zs (k + sz' - j)
-        | j == sz' = do
-            copySmallArray zs k xs i (sz - i)
-            shrinkSmallMutableArray zs (k + sz - i)
-        | (# p@(tok, t) #) <- indexSmallArray## xs i,
-          (# p'@(tok', t') #) <- indexSmallArray## ys j =
-            case compare tok tok' of
-              LT -> writeSmallArray zs k p >> go (i + 1) j (k + 1)
-              EQ -> writeSmallArray zs k (tok, f t t') >> go (i + 1) (j + 1) (k + 1)
-              GT -> writeSmallArray zs k p' >> go i (j + 1) (k + 1)
-
-  go 0 0 0
-  pure zs
-{-# INLINE mergeWith #-}
+    go len sp ~dt = case sp of
+      SNil -> let tok = headToken hd len in (tok, dt)
+      SApp sp u -> go (len + 1) sp (One TApp (reflTrie l u dt))
+      SFst sp -> go (len + 1) sp (One TFst dt)
+      SSnd sp -> go (len + 1) sp (One TSnd dt)
 
 --------------------------------------------------------------------------------
 -- Lookup
@@ -192,8 +172,9 @@ mergeWith f xs ys = runSmallArray do
 child :: Token -> Trie a -> Maybe (Trie a)
 child tok = \case
   Leaf {} -> error "impossible"
+  Empty -> Nothing
   One tok' ch -> ch <$ guard (tok == tok')
-  Node ch -> coerce $ foldMap (\(tok', x) -> First $ x <$ guard (tok == tok')) ch
+  Node ch -> lookupSmallArray tok ch
 {-# INLINE child #-}
 
 spineLength :: Spine -> Int
@@ -250,7 +231,7 @@ findConv' l v dt = case v of
     concat
       [ do
           let len = spineLength sp
-          dt <- maybeToList $ child (TTop x len) dt
+          dt <- maybeToList $ child (TTop len x) dt
           findConvSpine l sp dt,
         -- eta expand value (function)
         do
@@ -303,7 +284,7 @@ findConvSpine l sp dt = case sp of
 prettyToken :: Token -> ShowS
 prettyToken = \case
   TRigid x n -> showString "rigid " . shows x . showString "/" . shows n
-  TTop x n -> showString x . showString "/" . shows n
+  TTop n x -> showString x . showString "/" . shows n
   TU -> showString "U"
   TPi -> showString "Π"
   TLam -> showString "λ"
@@ -323,10 +304,11 @@ prettyTrieWith prettyLeaf = go ""
   where
     go indent = \case
       Leaf x -> showString indent . showString "• " . prettyLeaf x
+      Empty -> showString indent . showString "∅"
       One tok t
         | isEtaToken tok -> showString indent . showString "∅"
         | otherwise -> branch indent "└─ " "   " tok t
-      Node ts -> branches indent $ filter (not . isEtaToken . fst) $ GHC.IsList.toList ts
+      Node ts -> branches indent $ filter (not . isEtaToken . fst) $ toList ts
 
     branches indent = \case
       [] -> showString indent . showString "∅"
@@ -342,6 +324,7 @@ prettyTrieWith prettyLeaf = go ""
         . prettyToken tok
         . case t of
           Leaf x -> showString " → " . prettyLeaf x
+          Empty -> showChar '\n' . showString (indent ++ next) . showString "∅"
           One tok' _
             | isEtaToken tok' -> showChar '\n' . showString (indent ++ next) . showString "∅"
           One {} -> showChar '\n' . go (indent ++ next) t
