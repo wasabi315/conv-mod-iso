@@ -16,6 +16,7 @@ import Control.Parallel.Strategies
 import Data.Coerce
 import Data.Generics.Labels ()
 import Data.Ix
+import Data.Monoid
 import Data.Primitive.SmallArray
 import Flat
 import Lens.Micro.Platform
@@ -57,14 +58,8 @@ lookupSmallArray k xs = go 0
             GT -> go (i + 1)
 {-# INLINE lookupSmallArray #-}
 
-insertSmallArrayWith ::
-  (Ord k) =>
-  (a -> a -> a) ->
-  k ->
-  a ->
-  SmallArray (k, a) ->
-  SmallArray (k, a)
-insertSmallArrayWith f tok ~x xs = runSmallArray do
+insertSmallArray :: (Ord k, Semigroup a) => k -> a -> SmallArray (k, a) -> SmallArray (k, a)
+insertSmallArray tok ~x xs = runSmallArray do
   let sz = sizeofSmallArray xs
       go i
         | i == sz = do
@@ -80,20 +75,19 @@ insertSmallArrayWith f tok ~x xs = runSmallArray do
                 pure ys
               EQ -> do
                 xs <- thawSmallArray xs 0 sz
-                writeSmallArray xs i (tok, f x y)
+                writeSmallArray xs i (tok, x <> y)
                 pure xs
               GT -> go (i + 1)
 
   go 0
-{-# INLINE insertSmallArrayWith #-}
+{-# INLINEABLE insertSmallArray #-}
 
-mergeSmallArrayWith ::
-  (Ord k) =>
-  (a -> a -> a) ->
-  SmallArray (k, a) ->
-  SmallArray (k, a) ->
-  SmallArray (k, a)
-mergeSmallArrayWith f xs ys = runSmallArray do
+insertSmallArrayR :: forall k a. (Ord k, Semigroup a) => k -> a -> SmallArray (k, a) -> SmallArray (k, a)
+insertSmallArrayR = coerce (insertSmallArray @k @(Dual a))
+{-# INLINE insertSmallArrayR #-}
+
+mergeSmallArray :: (Ord k, Semigroup a) => SmallArray (k, a) -> SmallArray (k, a) -> SmallArray (k, a)
+mergeSmallArray xs ys = runSmallArray do
   let sz = sizeofSmallArray xs
       sz' = sizeofSmallArray ys
   zs <- newSmallArray (sz + sz') undefined
@@ -109,12 +103,12 @@ mergeSmallArrayWith f xs ys = runSmallArray do
           (# p'@(tok', t') #) <- indexSmallArray## ys j =
             case compare tok tok' of
               LT -> writeSmallArray zs k p >> go (i + 1) j (k + 1)
-              EQ -> writeSmallArray zs k (tok, f t t') >> go (i + 1) (j + 1) (k + 1)
+              EQ -> writeSmallArray zs k (tok, t <> t') >> go (i + 1) (j + 1) (k + 1)
               GT -> writeSmallArray zs k p' >> go i (j + 1) (k + 1)
 
   go 0 0 0
   pure zs
-{-# INLINE mergeSmallArrayWith #-}
+{-# INLINEABLE mergeSmallArray #-}
 
 -- more efficient than Traversable's mapAccumL
 -- lazy in accumulator

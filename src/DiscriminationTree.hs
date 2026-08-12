@@ -19,7 +19,7 @@ import Prelude hiding (curry, lookup)
 -- Tokens
 data Token
   = TRigid Level Int -- spine length
-  | TTop Int Name -- spine length first: derived Eq/Ord check the cheap Int before the Name
+  | TTop Int Name -- spine length first: Int comparison is cheaper
   | TU
   | TPi
   | TLam
@@ -30,14 +30,23 @@ data Token
   | TSnd
   deriving stock (Eq, Ord, Show)
 
+data Head
+  = HRigid Level
+  | HTop Name
+
+data Eta a
+  = Eta Level Head Spine ~(Trie a)
+  | Eta a :<> Eta a
+  deriving stock (Functor, Foldable, Traversable)
+
 -- Discrimination tree
 data Trie a
   = Leaf a
   | Empty
   | One Token ~(Trie a)
   | Node (SmallArray (Token, Trie a)) -- sorted unique tokens, two or more
-  | EtaOne Token ~(Trie a) ~(Trie a) ~(Trie a)
-  | EtaNode (SmallArray (Token, Trie a)) ~(Trie a) ~(Trie a)
+  | EtaOne Token ~(Trie a) (Eta a)
+  | EtaNode (SmallArray (Token, Trie a)) (Eta a)
   deriving stock (Functor, Foldable, Traversable)
 
 extract :: Trie a -> a
@@ -53,6 +62,18 @@ instance Monoid (Trie a) where
   mempty = Empty
   {-# INLINE mempty #-}
 
+{-# SPECIALIZE insertSmallArray ::
+  Token -> Trie a -> SmallArray (Token, Trie a) -> SmallArray (Token, Trie a)
+  #-}
+
+{-# SPECIALIZE insertSmallArrayR ::
+  Token -> Trie a -> SmallArray (Token, Trie a) -> SmallArray (Token, Trie a)
+  #-}
+
+{-# SPECIALIZE mergeSmallArray ::
+  SmallArray (Token, Trie a) -> SmallArray (Token, Trie a) -> SmallArray (Token, Trie a)
+  #-}
+
 union :: Trie a -> Trie a -> Trie a
 union = \cases
   t@(Leaf _) (Leaf _) -> t
@@ -64,45 +85,73 @@ union = \cases
     LT -> Node $ smallArrayFromListN 2 [(tok, t), (tok', t')]
     EQ -> One tok $ union t t'
     GT -> Node $ smallArrayFromListN 2 [(tok', t'), (tok, t)]
-  (One tok t) (EtaOne tok' t' l' p') -> case compare tok tok' of
-    LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) l' p'
-    EQ -> EtaOne tok (union t t') l' p'
-    GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) l' p'
   (One tok t) (Node ts') ->
-    Node $ insertSmallArrayWith union tok t ts'
-  (One tok t) (EtaNode ts' l' p') ->
-    EtaNode (insertSmallArrayWith union tok t ts') l' p'
-  (EtaOne tok t l p) (One tok' t') -> case compare tok tok' of
-    LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) l p
-    EQ -> EtaOne tok (union t t') l p
-    GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) l p
-  (EtaOne tok t l p) (EtaOne tok' t' l' p') -> do
-    let ~lu = union l l'
-        ~pu = union p p'
-    case compare tok tok' of
-      LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) lu pu
-      EQ -> EtaOne tok (union t t') lu pu
-      GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) lu pu
-  (EtaOne tok t l p) (Node ts') ->
-    EtaNode (insertSmallArrayWith union tok t ts') l p
-  (EtaOne tok t l p) (EtaNode ts' l' p') ->
-    EtaNode (insertSmallArrayWith union tok t ts') (union l l') (union p p')
+    Node $ insertSmallArray tok t ts'
+  (One tok t) (EtaOne tok' t' e') -> case compare tok tok' of
+    LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) e'
+    EQ -> EtaOne tok (union t t') e'
+    GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) e'
+  (One tok t) (EtaNode ts' e') ->
+    EtaNode (insertSmallArray tok t ts') e'
   (Node ts) (One tok' t') ->
-    Node $ insertSmallArrayWith (flip union) tok' t' ts
-  (Node ts) (EtaOne tok' t' l' p') ->
-    EtaNode (insertSmallArrayWith (flip union) tok' t' ts) l' p'
+    Node $ insertSmallArrayR tok' t' ts
   (Node ts) (Node ts') ->
-    Node $ mergeSmallArrayWith union ts ts'
-  (Node ts) (EtaNode ts' l' p') ->
-    EtaNode (mergeSmallArrayWith union ts ts') l' p'
-  (EtaNode ts l p) (One tok' t') ->
-    EtaNode (insertSmallArrayWith (flip union) tok' t' ts) l p
-  (EtaNode ts l p) (EtaOne tok' t' l' p') ->
-    EtaNode (insertSmallArrayWith (flip union) tok' t' ts) (union l l') (union p p')
-  (EtaNode ts l p) (Node ts') ->
-    EtaNode (mergeSmallArrayWith union ts ts') l p
-  (EtaNode ts l p) (EtaNode ts' l' p') ->
-    EtaNode (mergeSmallArrayWith union ts ts') (union l l') (union p p')
+    Node $ mergeSmallArray ts ts'
+  (Node ts) (EtaOne tok' t' e') ->
+    EtaNode (insertSmallArrayR tok' t' ts) e'
+  (Node ts) (EtaNode ts' e') ->
+    EtaNode (mergeSmallArray ts ts') e'
+  (EtaOne tok t e) (One tok' t') -> case compare tok tok' of
+    LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) e
+    EQ -> EtaOne tok (union t t') e
+    GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) e
+  (EtaOne tok t e) (Node ts') ->
+    EtaNode (insertSmallArray tok t ts') e
+  (EtaOne tok t e) (EtaOne tok' t' e') -> case compare tok tok' of
+    LT -> EtaNode (smallArrayFromListN 2 [(tok, t), (tok', t')]) (e :<> e')
+    EQ -> EtaOne tok (union t t') (e :<> e')
+    GT -> EtaNode (smallArrayFromListN 2 [(tok', t'), (tok, t)]) (e :<> e')
+  (EtaOne tok t e) (EtaNode ts' e') ->
+    EtaNode (insertSmallArray tok t ts') (e :<> e')
+  (EtaNode ts e) (One tok' t') ->
+    EtaNode (insertSmallArrayR tok' t' ts) e
+  (EtaNode ts e) (Node ts') ->
+    EtaNode (mergeSmallArray ts ts') e
+  (EtaNode ts e) (EtaOne tok' t' e') ->
+    EtaNode (insertSmallArrayR tok' t' ts) (e :<> e')
+  (EtaNode ts e) (EtaNode ts' e') ->
+    EtaNode (mergeSmallArray ts ts') (e :<> e')
+
+child :: Token -> Trie a -> Maybe (Trie a)
+child tok = \case
+  Leaf {} -> error "impossible"
+  Empty -> Nothing
+  One tok' ch -> ch <$ guard (tok == tok')
+  EtaOne tok' ch _ -> ch <$ guard (tok == tok')
+  Node ch -> lookupSmallArray tok ch
+  EtaNode ch _ -> lookupSmallArray tok ch
+{-# INLINE child #-}
+
+-- generate eta children on demand. never memoize
+etaLamChild :: Trie a -> Maybe (Trie a)
+etaLamChild = \case
+  EtaOne _ _ eta -> Just (go eta)
+  EtaNode _ eta -> Just (go eta)
+  _ -> Nothing
+  where
+    go = \case
+      Eta l hd sp dt -> etaTrie (l + 1) hd (SApp sp (VVar l)) dt
+      a :<> b -> go a <> go b
+
+etaPairChild :: Trie a -> Maybe (Trie a)
+etaPairChild = \case
+  EtaOne _ _ eta -> Just (go eta)
+  EtaNode _ eta -> Just (go eta)
+  _ -> Nothing
+  where
+    go = \case
+      Eta l hd sp dt -> etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) dt
+      a :<> b -> go a <> go b
 
 --------------------------------------------------------------------------------
 -- "Saturated" discrimination tree costruction
@@ -168,24 +217,14 @@ reflTrie l v ~dt = case v of
       reflTrie l t do
         reflTrie l u dt
 
-data Head
-  = HRigid Level
-  | HTop Name
-
 headToken :: Head -> Int -> Token
 headToken = \cases
   (HRigid x) len -> TRigid x len
   (HTop x) len -> TTop len x
 
--- eta-expand speculatively and infinitely
 etaTrie :: Level -> Head -> Spine -> Trie a -> Trie a
 etaTrie l hd sp ~dt = case reflTrieSpine l hd sp dt of
-  (tok, dt') ->
-    EtaOne
-      tok
-      dt'
-      (etaTrie (l + 1) hd (SApp sp (VVar l)) dt)
-      (etaTrie l hd (SFst sp) $ etaTrie l hd (SSnd sp) dt)
+  (tok, dt') -> EtaOne tok dt' (Eta l hd sp dt)
 
 reflTrieSpine :: Level -> Head -> Spine -> Trie a -> (Token, Trie a)
 reflTrieSpine l hd = go 0
@@ -198,28 +237,6 @@ reflTrieSpine l hd = go 0
 
 --------------------------------------------------------------------------------
 -- Lookup
-
-child :: Token -> Trie a -> Maybe (Trie a)
-child tok = \case
-  Leaf {} -> error "impossible"
-  Empty -> Nothing
-  One tok' ch -> ch <$ guard (tok == tok')
-  EtaOne tok' ch _ _ -> ch <$ guard (tok == tok')
-  Node ch -> lookupSmallArray tok ch
-  EtaNode ch _ _ -> lookupSmallArray tok ch
-{-# INLINE child #-}
-
-etaLamChild :: Trie a -> Maybe (Trie a)
-etaLamChild = \case
-  EtaOne _ _ l _ -> Just l
-  EtaNode _ l _ -> Just l
-  _ -> Nothing
-
-etaPairChild :: Trie a -> Maybe (Trie a)
-etaPairChild = \case
-  EtaOne _ _ _ p -> Just p
-  EtaNode _ _ p -> Just p
-  _ -> Nothing
 
 spineLength :: Spine -> Int
 spineLength = \case
@@ -361,8 +378,8 @@ prettyTrieWith prettyLeaf = go ""
       Empty -> showString indent . showString "∅"
       One tok t -> branch indent "└─ " "   " tok t
       Node ts -> branches indent $ toList ts
-      EtaOne tok t _ _ -> branch indent "└─ " "   " tok t
-      EtaNode ts _ _ -> branches indent $ toList ts
+      EtaOne tok t _ -> branch indent "└─ " "   " tok t
+      EtaNode ts _ -> branches indent $ toList ts
 
     branches indent = \case
       [] -> showString indent . showString "∅"
@@ -379,9 +396,7 @@ prettyTrieWith prettyLeaf = go ""
         . case t of
           Leaf x -> showString " → " . prettyLeaf x
           Empty -> showChar '\n' . showString (indent ++ next) . showString "∅"
-          One {}; Node {} -> showChar '\n' . go (indent ++ next) t
-          EtaOne tok t _ _ -> showChar '\n' . go (indent ++ next) (One tok t)
-          EtaNode ts _ _ -> showChar '\n' . go (indent ++ next) (Node ts)
+          One {}; Node {}; EtaOne {}; EtaNode {} -> showChar '\n' . go (indent ++ next) t
 
 prettyTrie :: (Show a) => Trie a -> ShowS
 prettyTrie = prettyTrieWith shows
