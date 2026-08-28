@@ -177,7 +177,7 @@ isoTriePiGen l gen k =
           let i' = iso <> piCongL j <> Curry
           isoTrie' l a1 \ia -> do
             let ~u = transportInv ia (VVar l)
-                pi = VPiArg name (a2 u) \ ~v -> residual (transportInv j (VPair u v))
+                pi = VPiArg name (a2 u) \ ~v -> cod (transportInv j (VPair u v))
             -- do isoTriePi from the start if dom is sigma
             isoTriePi (l + 1) pi \ib ->
               k $! i' <> piCongL ia <> piCongR ib
@@ -185,7 +185,7 @@ isoTriePiGen l gen k =
         let ~u = transportInv ia (VVar l)
             sub ib = k $! iso <> piCongL ia <> piCongR ib
         case next of
-          Nothing -> isoTrie' (l + 1) (residual u) sub
+          Nothing -> isoTrie' (l + 1) (cod u) sub
           Just gen' -> isoTriePiGen (l + 1) (gen' u) sub
 
 isoTrieSigma :: Level -> VSigmaArg -> (Iso -> Trie a) -> Trie a

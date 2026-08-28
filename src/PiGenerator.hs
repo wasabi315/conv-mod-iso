@@ -29,8 +29,8 @@ data PiGen = PiGen
 data DomChoice = DomChoice
   { name :: Name,
     dom :: VTyp,
+    cod :: Value -> VTyp,
     iso :: Iso,
-    residual :: Value -> VTyp,
     next :: Maybe (Value -> PiGen)
   }
 
@@ -66,9 +66,9 @@ domChoices PiGen {..} =
     let (!name, !dom) = indexSmallArray tele i
         remaining' = clearBit remaining i
         iso = swaps $ popCount (remaining .&. (bit i - 1))
-        residual ~v = do
+        cod ~v = do
           let subst' = updateSmallArray i v subst
-          residualType original subst' remaining'
+          currentCod original subst' remaining'
         next
           | remaining' == 0 = Nothing
           | otherwise = Just \ ~v -> do
@@ -85,9 +85,8 @@ currentTele (VPiArg x a b) subst = mapAccumSmallArrayL_ step (VPi x a b) subst
     step _ _ = error "impossible"
 {-# INLINE currentTele #-}
 
--- current residual type
-residualType :: VPiArg -> SmallArray Value -> Int -> VTyp
-residualType (VPiArg x a b) subst rem =
+currentCod :: VPiArg -> SmallArray Value -> Int -> VTyp
+currentCod (VPiArg x a b) subst rem =
   foldr step id [0 .. sizeofSmallArray subst - 1] (VPi x a b)
   where
     step i k = \case
@@ -95,7 +94,7 @@ residualType (VPiArg x a b) subst rem =
         | testBit rem i -> VPi y a \ ~v -> k (b v)
         | (# v #) <- indexSmallArray## subst i -> k (b v)
       _ -> error "impossible"
-{-# INLINE residualType #-}
+{-# INLINE currentCod #-}
 
 swaps :: Int -> Iso
 swaps 0 = Refl
@@ -103,7 +102,30 @@ swaps n = go (n - 1)
   where
     go 0 = PiSwap
     go n = PiCongR (go (n - 1)) `Trans` PiSwap
-{-# INLINE swaps #-}
 
 placeholder :: Value
 placeholder = VVar (-1)
+
+-- | Free levels in @[from, to)@. The value is scoped at @to@.
+levelsBetween :: Level -> Level -> Value -> IS.IntSet
+levelsBetween from to = go to
+  where
+    go l = \case
+      VRigid x sp ->
+        ( if from <= x && x < to
+            then IS.singleton (coerce x)
+            else mempty
+        )
+          <> goSpine l sp
+      VTop _ sp -> goSpine l sp
+      VU -> mempty
+      VPi _ a b -> go l a <> go (l + 1) (b $ VVar l)
+      VLam _ t -> go (l + 1) (t $ VVar l)
+      VSigma _ a b -> go l a <> go (l + 1) (b $ VVar l)
+      VPair t u -> go l t <> go l u
+
+    goSpine l = \case
+      SNil -> mempty
+      SApp sp u -> goSpine l sp <> go l u
+      SFst sp -> goSpine l sp
+      SSnd sp -> goSpine l sp
