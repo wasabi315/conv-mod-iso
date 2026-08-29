@@ -9,6 +9,7 @@ where
 import Common
 import Data.Bits
 import Data.IntSet qualified as IS
+import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
 import Isomorphism
 import Value
@@ -19,7 +20,7 @@ import Value
 data PiGen = PiGen
   { original :: {-# UNPACK #-} VPiArg,
     -- dependency mask per original position
-    depMasks :: {-# UNPACK #-} SmallArray Int,
+    depMasks :: {-# UNPACK #-} PrimArray Int,
     -- mask of not-yet-emitted positions
     remaining :: Int,
     -- substitution per original position, placeholder elsewhere
@@ -36,12 +37,12 @@ data DomChoice = DomChoice
 
 initPiGen :: Level -> VPiArg -> PiGen
 initPiGen l (VPiArg x a b) = do
-  let deps = smallArrayFromList $ 0 : depMasks (l + 1) (b $ VVar l)
+  let deps = primArrayFromList $ 0 : depMasks (l + 1) (b $ VVar l)
   PiGen
     { original = VPiArg x a b,
       depMasks = deps,
-      remaining = (1 `unsafeShiftL` sizeofSmallArray deps) - 1,
-      subst = runSmallArray (newSmallArray (sizeofSmallArray deps) placeholder)
+      remaining = (1 `unsafeShiftL` sizeofPrimArray deps) - 1,
+      subst = runSmallArray (newSmallArray (sizeofPrimArray deps) placeholder)
     }
   where
     depMasks l' = \case
@@ -60,9 +61,9 @@ domChoices :: PiGen -> [DomChoice]
 domChoices PiGen {..} =
   [ DomChoice {..}
   | let tele = currentTele original subst,
-    i <- [0 .. sizeofSmallArray depMasks - 1],
+    i <- [0 .. sizeofPrimArray depMasks - 1],
     testBit remaining i,
-    (indexSmallArray depMasks i .&. remaining) == 0,
+    (indexPrimArray depMasks i .&. remaining) == 0,
     let (!name, !dom) = indexSmallArray tele i
         remaining' = clearBit remaining i
         iso = swaps $ popCount (remaining .&. (bit i - 1))
