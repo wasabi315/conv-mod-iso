@@ -105,13 +105,14 @@ executable conv-mod-iso
       Strict
       UnboxedTuples
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -rtsopts -with-rtsopts= "-A256M"
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-N -A32M"
   build-depends:
       base >=4.7 && <5
     , bytestring
     , conv-mod-iso
     , generic-lens
     , microlens-platform
+    , parallel
     , primitive
     , time
   default-language: GHC2021

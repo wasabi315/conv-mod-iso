@@ -84,12 +84,13 @@ executables:
     source-dirs: app
     main: Main.hs
     ghc-options:
-      # - -threaded
+      - -threaded
       - -rtsopts
-      - -with-rtsopts= "-A256M"
+      - -with-rtsopts= "-N -A32M"
     dependencies:
       - bytestring
       - conv-mod-iso
+      - parallel
 
 tests:
   conv-mod-iso-test:
