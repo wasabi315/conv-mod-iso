@@ -37,6 +37,7 @@ library
       ConversionModuloIsomorphism
       DiscriminationTree
       Evaluation
+      Heuristic
       Isomorphism
       PiGenerator
       Pretty
@@ -76,7 +77,7 @@ library
     , time
   default-language: GHC2021
   if flag(dump)
-    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file -dppr-cols=300
   if flag(llvm)
     ghc-options: -fllvm
 
@@ -114,7 +115,7 @@ executable conv-mod-iso
     , time
   default-language: GHC2021
   if flag(dump)
-    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file -dppr-cols=300
   if flag(llvm)
     ghc-options: -fllvm
 
@@ -152,6 +153,6 @@ test-suite conv-mod-iso-test
     , time
   default-language: GHC2021
   if flag(dump)
-    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file -dppr-cols=300
   if flag(llvm)
     ghc-options: -fllvm

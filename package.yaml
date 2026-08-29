@@ -65,6 +65,7 @@ when:
       - -dsuppress-all
       - -dno-suppress-type-signatures
       - -ddump-to-file
+      - -dppr-cols=300
   - condition: flag(llvm)
     ghc-options:
       - -fllvm

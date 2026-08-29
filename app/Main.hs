@@ -8,6 +8,7 @@ import Data.Foldable
 import Data.Time.Clock
 import DiscriminationTree
 import Evaluation
+import Heuristic
 import Isomorphism
 import System.Environment
 import Term
@@ -54,6 +55,24 @@ main =
           case findConvIso 0 (eval [] t) dt of
             [] -> pure ()
             _ : _ -> error "bug in isoTrie/findConv"
+      print t
+    ["bench5"] -> do
+      Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
+      ts <- evaluate $ force ts
+      (_, t) <- timed do
+        let match = refineConvIso0 compSquareH
+        for_ ts \t -> case match t of
+          _ : _ -> pure ()
+          [] -> error "bug in refineConvIso0"
+      print t
+    ["bench6"] -> do
+      Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
+      ts <- evaluate $ force ts
+      (_, t) <- timed do
+        let match = refineConvIso0 compSquareV
+        for_ ts \t -> case match t of
+          [] -> pure ()
+          _ : _ -> error "bug in refineConvIso0"
       print t
     _ -> error "invalid argument"
 
