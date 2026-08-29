@@ -37,14 +37,13 @@ convPiG l pi gen = do
   DomChoice {..} <- domChoices gen
   case dom of
     VSigma y a1 a2 -> do
-      (VSigmaArg _ a1 a2, j) <- assocSwap l (VSigmaArg y a1 a2)
-      let i' = iso <> piCongL j <> Curry
-      (ia, ia') <- convIso l a a1
+      (VPiArg _ dom cod, j) <- curryDom l name (VSigmaArg y a1 a2) cod
+      let iso' = iso <> j
+      (ia, ia') <- convIso l a dom
       let v = transportInv ia (VVar l)
           v' = transportInv ia' (VVar l)
-          pi = VPi name (a2 v') \ ~u -> cod (transportInv j (VPair v' u))
-      (ib, ib') <- convIso (l + 1) (b v) pi
-      pure $! i <> piCongL ia <> piCongR ib // i' <> piCongL ia' <> piCongR ib'
+      (ib, ib') <- convIso (l + 1) (b v) (cod v')
+      pure $! i <> piCongL ia <> piCongR ib // iso' <> piCongL ia' <> piCongR ib'
     dom -> do
       (ia, ia') <- convIso l a dom
       let v = transportInv ia (VVar l)

@@ -255,6 +255,15 @@ assocSwap l = go
           pure (q, k)
         _ -> pure r
 
+curryDom :: Level -> Name -> VSigmaArg -> (Value -> VTyp) -> [(VPiArg, Iso)]
+curryDom l x (VSigmaArg y a b) c =
+  [ ( VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (transportInv j (VPair u v)),
+      piCongL j <> Curry
+    )
+  | (VSigmaArg y a b, j) <- assocSwap l (VSigmaArg y a b)
+  ]
+{-# INLINE curryDom #-}
+
 -- | Pick a **non-sigma** domain without breaking dependencies.
 -- This works even in the presence of arbitrarily nested sigmas in the type.
 
@@ -267,11 +276,8 @@ currySwap :: Level -> VPiArg -> [(VPiArg, Iso)]
 currySwap l q = do
   r@(q, i) <- pickUpDomain l q
   case q of
-    VPiArg x (VSigma y a b) c -> do
-      (VSigmaArg y a b, j) <- assocSwap l (VSigmaArg y a b)
-      let q = VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (transportInv j (VPair u v))
-          k = i <> piCongL j <> Curry
-      pure (q, k)
+    VPiArg x (VSigma y a b) c ->
+      map (fmap (i <>)) $ curryDom l x (VSigmaArg y a b) c
     _ -> pure r
 
 --------------------------------------------------------------------------------

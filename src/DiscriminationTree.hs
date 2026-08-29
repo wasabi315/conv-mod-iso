@@ -173,13 +173,12 @@ isoTriePiGen l gen k =
   One TPi do
     flip foldMap'' (domChoices gen) \DomChoice {..} -> case dom of
       VSigma y a1 a2 ->
-        flip foldMap'' (assocSwap l (VSigmaArg y a1 a2)) \(VSigmaArg _ a1 a2, j) -> do
-          let i' = iso <> piCongL j <> Curry
+        flip foldMap'' (curryDom l name (VSigmaArg y a1 a2) cod) \(VPiArg _ a1 cod', j) -> do
+          let i' = iso <> j
           isoTrie' l a1 \ia -> do
             let ~u = transportInv ia (VVar l)
-                pi = VPiArg name (a2 u) \ ~v -> cod (transportInv j (VPair u v))
-            -- do isoTriePi from the start if dom is sigma
-            isoTriePi (l + 1) pi \ib ->
+            -- cod' is pi, so isoTrie' restarts the generator for it
+            isoTrie' (l + 1) (cod' u) \ib ->
               k $! i' <> piCongL ia <> piCongR ib
       a -> isoTrie' l a \ia -> do
         let ~u = transportInv ia (VVar l)
