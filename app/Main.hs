@@ -40,9 +40,9 @@ main =
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
       ts <- evaluate $ force ts
       (_, t) <- timed do
-        let dt = isoTrie 0 (eval [] compSquareH)
+        let dt = isoTrie 0 (eval emptyEnv compSquareH)
         for_ ts \t -> do
-          case findConvIso 0 (eval [] t) dt of
+          case findConvIso 0 (eval emptyEnv t) dt of
             _ : _ -> pure ()
             [] -> error "bug in isoTrie/findConv"
       print t
@@ -50,9 +50,9 @@ main =
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
       ts <- evaluate $ force ts
       (_, t) <- timed do
-        let dt = isoTrie 0 (eval [] compSquareV)
+        let dt = isoTrie 0 (eval emptyEnv compSquareV)
         for_ ts \t -> do
-          case findConvIso 0 (eval [] t) dt of
+          case findConvIso 0 (eval emptyEnv t) dt of
             [] -> pure ()
             _ : _ -> error "bug in isoTrie/findConv"
       print t

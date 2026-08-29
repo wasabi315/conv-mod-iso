@@ -284,7 +284,7 @@ currySwap l q = do
 -- Normalisation
 
 normalise0 :: Term -> (Term, Iso)
-normalise0 t = normalise 0 (eval [] t)
+normalise0 t = normalise 0 (eval emptyEnv t)
 
 normalise :: Level -> Value -> (Term, Iso)
 normalise l = \case
@@ -310,7 +310,7 @@ normaliseSigma l q = do
 -- Normalisation + Permutation
 
 normalisePermute0 :: Term -> [(Term, Iso)]
-normalisePermute0 t = normalisePermute 0 (eval [] t)
+normalisePermute0 t = normalisePermute 0 (eval emptyEnv t)
 
 normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case

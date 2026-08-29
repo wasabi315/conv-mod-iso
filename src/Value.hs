@@ -1,5 +1,7 @@
 module Value where
 
+import Data.SkewList.Lazy (SkewList)
+import Data.SkewList.Lazy qualified as SL
 import Common
 import Data.String
 
@@ -34,7 +36,10 @@ data Spine
 pattern VVar :: Level -> Value
 pattern VVar x = VRigid x SNil
 
-type Env = [Value]
+type Env = SkewList Value
+
+emptyEnv :: Env
+emptyEnv = SL.empty
 
 data VPiArg = VPiArg Name Value (Value -> Value)
 

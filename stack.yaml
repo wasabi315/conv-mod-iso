@@ -1,1 +1,9 @@
 resolver: nightly-2025-12-30
+
+extra-deps:
+  - skew-list-0.1
+
+# skew-list-0.1 bounds QuickCheck <2.16; the snapshot has 2.16
+allow-newer: true
+allow-newer-deps:
+  - skew-list

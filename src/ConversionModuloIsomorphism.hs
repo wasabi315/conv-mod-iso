@@ -13,7 +13,7 @@ import Prelude hiding (curry)
 
 convIso0 :: Term -> Term -> [Iso]
 convIso0 t u = do
-  (i, j) <- convIso 0 (eval [] t) (eval [] u)
+  (i, j) <- convIso 0 (eval emptyEnv t) (eval emptyEnv u)
   pure $! i <> sym j
 
 convIso :: Level -> Value -> Value -> [(Iso, Iso)]

@@ -16,7 +16,7 @@ import Value
 -- Disclaimer: claude came up with this heuristics
 
 refine0 :: Typ -> (Typ, Iso)
-refine0 t = refine 0 (eval [] t)
+refine0 t = refine 0 (eval emptyEnv t)
 
 refineConvIso0 :: Typ -> (Typ -> [Iso])
 refineConvIso0 t = do

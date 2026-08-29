@@ -75,6 +75,7 @@ library:
   dependencies:
     - containers
     - deepseq
+    - skew-list
     - flat
     - parallel
 

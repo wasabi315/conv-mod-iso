@@ -74,6 +74,7 @@ library
     , microlens-platform
     , parallel
     , primitive
+    , skew-list
     , time
   default-language: GHC2021
   if flag(dump)
