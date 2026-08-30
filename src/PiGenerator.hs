@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
 module PiGenerator
   ( PiGen,
     initPiGen,
@@ -42,7 +44,7 @@ initPiGen l (VPiArg x a b) = do
     { original = VPiArg x a b,
       depMasks = deps,
       remaining = (1 `unsafeShiftL` sizeofPrimArray deps) - 1,
-      subst = runSmallArray (newSmallArray (sizeofPrimArray deps) placeholder)
+      subst = runSmallArray (newSmallArray (sizeofPrimArray deps) Placeholder)
     }
   where
     depMasks l' = \case
@@ -58,44 +60,46 @@ initPiGen l (VPiArg x a b) = do
         . levelsBetween l l'
 
 domChoices :: PiGen -> [DomChoice]
-domChoices PiGen {..} =
-  [ DomChoice {..}
-  | let tele = currentTele original subst,
-    i <- [0 .. sizeofPrimArray depMasks - 1],
-    testBit remaining i,
-    (indexPrimArray depMasks i .&. remaining) == 0,
-    let (!name, !dom) = indexSmallArray tele i
-        remaining' = clearBit remaining i
-        iso = swaps $ popCount (remaining .&. (bit i - 1))
-        cod ~v = do
-          let subst' = updateSmallArray i v subst
-          currentCod original subst' remaining'
-        next
-          | remaining' == 0 = Nothing
-          | otherwise = Just \ ~v -> do
-              let subst' = updateSmallArray i v subst
-              PiGen {remaining = remaining', subst = subst', ..}
-  ]
+domChoices PiGen {..} = unfoldr' step (0, orig)
+  where
+    sz = sizeofPrimArray depMasks
+    orig = case original of VPiArg x a b -> VPi x a b
+
+    step (!i, t)
+      | i >= sz = Done
+      | testBit remaining i,
+        (indexPrimArray depMasks i .&. remaining) == 0 = do
+          let remaining' = clearBit remaining i
+              iso = swaps $ popCount (remaining .&. (bit i - 1))
+              cod ~w = do
+                let subst' = updateSmallArray i w subst
+                currentCod original subst'
+              next
+                | remaining' == 0 = Nothing
+                | otherwise = Just \ ~w -> do
+                    let subst' = updateSmallArray i w subst
+                    PiGen {remaining = remaining', subst = subst', ..}
+              VPi name dom b = t
+              (# v #) = indexSmallArray## subst i
+          Yield DomChoice {..} (i + 1, b v)
+      | otherwise = do
+          let VPi _ _ b = t
+              (# v #) = indexSmallArray## subst i
+          Skip (i + 1, b v)
 {-# INLINE domChoices #-}
 
--- a domain is valid iff its dependencies have already been emitted
-currentTele :: VPiArg -> SmallArray Value -> SmallArray (Name, VTyp)
-currentTele (VPiArg x a b) subst = mapAccumSmallArrayL_ step (VPi x a b) subst
+currentCod :: VPiArg -> SmallArray Value -> VTyp
+currentCod (VPiArg x a b) subst = foldr step id subst (VPi x a b)
   where
-    step (VPi x a b) v = (b v, (x, a))
-    step _ _ = error "impossible"
-{-# INLINE currentTele #-}
-
-currentCod :: VPiArg -> SmallArray Value -> Int -> VTyp
-currentCod (VPiArg x a b) subst rem =
-  foldr step id [0 .. sizeofSmallArray subst - 1] (VPi x a b)
-  where
-    step i k = \case
+    step v k = \case
       VPi y a b
-        | testBit rem i -> VPi y a \ ~v -> k (b v)
-        | (# v #) <- indexSmallArray## subst i -> k (b v)
+        | Placeholder <- v -> VPi y a \ ~w -> k (b w)
+        | otherwise -> k (b v)
       _ -> error "impossible"
 {-# INLINE currentCod #-}
+
+pattern Placeholder :: Value
+pattern Placeholder = VVar (-1)
 
 swaps :: Int -> Iso
 swaps 0 = Refl
@@ -103,9 +107,6 @@ swaps n = go (n - 1)
   where
     go 0 = PiSwap
     go n = PiCongR (go (n - 1)) `Trans` PiSwap
-
-placeholder :: Value
-placeholder = VVar (-1)
 
 -- | Free levels in @[from, to)@. The value is scoped at @to@.
 levelsBetween :: Level -> Level -> Value -> IS.IntSet

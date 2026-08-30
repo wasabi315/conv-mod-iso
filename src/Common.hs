@@ -19,6 +19,7 @@ import Data.Ix
 import Data.Monoid
 import Data.Primitive.SmallArray
 import Flat
+import GHC.Exts
 import Lens.Micro.Platform
 
 --------------------------------------------------------------------------------
@@ -110,24 +111,24 @@ mergeSmallArray xs ys = runSmallArray do
   pure zs
 {-# INLINEABLE mergeSmallArray #-}
 
--- more efficient than Traversable's mapAccumL
--- lazy in accumulator
-mapAccumSmallArrayL_ :: (b -> a -> (b, c)) -> b -> SmallArray a -> SmallArray c
-mapAccumSmallArrayL_ f z0 xs = do
-  let sz = sizeofSmallArray xs
-  createSmallArray sz undefined \ys -> do
-    let go i ~z
-          | i == sz = pure ()
-          | (# x #) <- indexSmallArray## xs i,
-            (z', y) <- f z x =
-              writeSmallArray ys i y >> go (i + 1) z'
-    go 0 z0
-{-# INLINE mapAccumSmallArrayL_ #-}
-
 -- Prelude's foldMap' doesn't inline
 foldMap'' :: (Monoid m, Foldable t) => (a -> m) -> t a -> m
-foldMap'' ~f = foldl' (\ ~acc ~a -> acc <> f a) mempty
+foldMap'' f = foldl' (\acc ~a -> acc <> f a) mempty
 {-# INLINE foldMap'' #-}
+
+data Step a b
+  = Done
+  | Yield ~a b
+  | Skip b
+
+unfoldr' :: (b -> Step a b) -> b -> [a]
+unfoldr' f b0 = build \ ~c ~n -> do
+  let go b = case f b of
+        Done -> n
+        Yield a b -> a `c` go b
+        Skip b -> go b
+  go b0
+{-# INLINE unfoldr' #-}
 
 --------------------------------------------------------------------------------
 -- Names

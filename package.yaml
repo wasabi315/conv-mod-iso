@@ -107,7 +107,7 @@ benchmarks:
     source-dirs: bench
     ghc-options:
       - -rtsopts
-      - -with-rtsopts= "-N -A32M"
+      - -with-rtsopts= "-A32M"
     dependencies:
       - conv-mod-iso
       - tasty
