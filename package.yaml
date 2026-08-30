@@ -22,9 +22,15 @@ flags:
 
 dependencies:
   - base >= 4.7 && < 5
+  - bytestring
+  - containers
+  - deepseq
+  - flat
   - microlens-platform
   - generic-lens
+  - parallel
   - primitive
+  - skew-list
   - time
 
 default-extensions:
@@ -72,12 +78,6 @@ when:
 
 library:
   source-dirs: src
-  dependencies:
-    - containers
-    - deepseq
-    - skew-list
-    - flat
-    - parallel
 
 executables:
   conv-mod-iso:
@@ -88,9 +88,7 @@ executables:
       - -rtsopts
       - -with-rtsopts= "-N -A32M"
     dependencies:
-      - bytestring
       - conv-mod-iso
-      - parallel
 
 tests:
   conv-mod-iso-test:
@@ -102,3 +100,19 @@ tests:
       - -with-rtsopts= "-A64M -s -N4"
     dependencies:
       - conv-mod-iso
+
+benchmarks:
+  conv-mod-iso-bench:
+    main: Main.hs
+    source-dirs: bench
+    ghc-options:
+      - -rtsopts
+      - -with-rtsopts= "-N -A32M"
+    dependencies:
+      - conv-mod-iso
+      - tasty
+      - tasty-bench
+    when:
+      condition: "impl(ghc >= 8.6)"
+      ghc-options:
+        - -fproc-alignment=64

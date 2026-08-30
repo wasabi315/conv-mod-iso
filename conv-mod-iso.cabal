@@ -67,6 +67,7 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2
   build-depends:
       base >=4.7 && <5
+    , bytestring
     , containers
     , deepseq
     , flat
@@ -109,11 +110,15 @@ executable conv-mod-iso
   build-depends:
       base >=4.7 && <5
     , bytestring
+    , containers
     , conv-mod-iso
+    , deepseq
+    , flat
     , generic-lens
     , microlens-platform
     , parallel
     , primitive
+    , skew-list
     , time
   default-language: GHC2021
   if flag(dump)
@@ -148,13 +153,67 @@ test-suite conv-mod-iso-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
   build-depends:
       base >=4.7 && <5
+    , bytestring
+    , containers
     , conv-mod-iso
+    , deepseq
+    , flat
     , generic-lens
     , microlens-platform
+    , parallel
     , primitive
+    , skew-list
     , time
   default-language: GHC2021
   if flag(dump)
     ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file -dppr-cols=300
   if flag(llvm)
     ghc-options: -fllvm
+
+benchmark conv-mod-iso-bench
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Paths_conv_mod_iso
+  hs-source-dirs:
+      bench
+  default-extensions:
+      BlockArguments
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      LambdaCase
+      MagicHash
+      NoFieldSelectors
+      OrPatterns
+      OverloadedStrings
+      OverloadedRecordDot
+      OverloadedLabels
+      PatternSynonyms
+      RecordWildCards
+      Strict
+      UnboxedTuples
+      ViewPatterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -rtsopts -with-rtsopts= "-N -A32M"
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , containers
+    , conv-mod-iso
+    , deepseq
+    , flat
+    , generic-lens
+    , microlens-platform
+    , parallel
+    , primitive
+    , skew-list
+    , tasty
+    , tasty-bench
+    , time
+  default-language: GHC2021
+  if flag(dump)
+    ghc-options: -ddump-simpl -dsuppress-all -dno-suppress-type-signatures -ddump-to-file -dppr-cols=300
+  if flag(llvm)
+    ghc-options: -fllvm
+  if impl(ghc >= 8.6)
+    ghc-options: -fproc-alignment=64
