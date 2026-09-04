@@ -42,8 +42,8 @@ convPiG l pi gen = do
   let v = transportInv ia (VVar l)
       v' = transportInv ia' (VVar l)
   (ib, ib') <- case next of
-    Nothing -> convIso (l + 1) (b v) (cod v')
-    Just gen | VPi y c d <- b v -> convPiG (l + 1) (VPiArg y c d) (gen v')
+    Left cod -> convIso (l + 1) (b v) (cod v')
+    Right gen | VPi y c d <- b v -> convPiG (l + 1) (VPiArg y c d) (gen v')
     _ -> []
   pure $! i <> piCongL ia <> piCongR ib // iso <> piCongL ia' <> piCongR ib'
 

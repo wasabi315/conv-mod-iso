@@ -14,7 +14,6 @@ where
 
 import Common
 import Data.Bits
-import Data.IntSet qualified as IS
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
 import Isomorphism
@@ -26,26 +25,23 @@ pattern Placeholder :: Value
 pattern Placeholder = VVar (-1)
 
 -- | Free levels in @[from, to)@. The value is scoped at @to@.
-levelsBetween :: Level -> Level -> Value -> IS.IntSet
+levelsBetween :: Level -> Level -> Value -> Int
 levelsBetween from to = go to
   where
     go l = \case
-      VRigid x sp ->
-        ( if from <= x && x < to
-            then IS.singleton (coerce x)
-            else mempty
-        )
-          <> goSpine l sp
+      VRigid x sp
+        | from <= x && x < to -> setBit (goSpine l sp) (coerce (x - from))
+        | otherwise -> goSpine l sp
       VTop _ sp -> goSpine l sp
-      VU -> mempty
-      VPi _ a b -> go l a <> go (l + 1) (b $ VVar l)
+      VU -> 0
+      VPi _ a b -> go l a .|. go (l + 1) (b $ VVar l)
       VLam _ t -> go (l + 1) (t $ VVar l)
-      VSigma _ a b -> go l a <> go (l + 1) (b $ VVar l)
-      VPair t u -> go l t <> go l u
+      VSigma _ a b -> go l a .|. go (l + 1) (b $ VVar l)
+      VPair t u -> go l t .|. go l u
 
     goSpine l = \case
-      SNil -> mempty
-      SApp sp u -> goSpine l sp <> go l u
+      SNil -> 0
+      SApp sp u -> goSpine l sp .|. go l u
       SFst sp -> goSpine l sp
       SSnd sp -> goSpine l sp
 
@@ -65,9 +61,8 @@ data PiGen = PiGen
 data DomChoice = DomChoice
   { name :: Name,
     dom :: VTyp,
-    cod :: Value -> VTyp,
     iso :: Iso,
-    next :: Maybe (Value -> PiGen)
+    next :: Either (Value -> VTyp) (Value -> PiGen)
   }
 
 initPiGen :: Level -> VPiArg -> PiGen
@@ -83,16 +78,8 @@ initPiGen l (VPiArg x a b) =
     sz = sizeofPrimArray deps
 
     depMasks l' = \case
-      VPi _ a b -> do
-        let mask = depMask l' a
-        mask : depMasks (l' + 1) (b $ VVar l')
+      VPi _ a b -> levelsBetween l l' a : depMasks (l' + 1) (b $ VVar l')
       _ -> []
-
-    depMask l' =
-      IS.foldl'
-        (\mask x -> setBit mask (x - coerce l))
-        (0 :: Int)
-        . levelsBetween l l'
 
 domChoices :: PiGen -> [DomChoice]
 domChoices PiGen {..} = unfoldr' step (0, orig)
@@ -106,12 +93,11 @@ domChoices PiGen {..} = unfoldr' step (0, orig)
         (indexPrimArray depMasks i .&. remaining) == 0 = do
           let remaining' = clearBit remaining i
               iso = piSwaps $ popCount (remaining .&. (bit i - 1))
-              cod ~w = do
-                let subst' = updateSmallArray i w subst
-                currentCod original subst' remaining'
               next
-                | remaining' == 0 = Nothing
-                | otherwise = Just \ ~w -> do
+                | remaining' == 0 = Left \ ~w -> do
+                    let subst' = updateSmallArray i w subst
+                    finalCod original subst'
+                | otherwise = Right \ ~w -> do
                     let subst' = updateSmallArray i w subst
                     PiGen {remaining = remaining', subst = subst', ..}
               VPi name dom b = t
@@ -123,16 +109,12 @@ domChoices PiGen {..} = unfoldr' step (0, orig)
           Skip (i + 1, b v)
 {-# INLINE domChoices #-}
 
-currentCod :: VPiArg -> SmallArray Value -> Int -> VTyp
-currentCod (VPiArg x a b) subst rem =
-  ifoldrSmallArray step id subst (VPi x a b)
+finalCod :: VPiArg -> SmallArray Value -> VTyp
+finalCod (VPiArg x a b) subst = foldl' step (VPi x a b) subst
   where
-    step i v k = \case
-      VPi y c d
-        | testBit rem i -> VPi y c \ ~w -> k (d w)
-        | otherwise -> k (d v)
-      _ -> error "impossible"
-{-# INLINE currentCod #-}
+    step (VPi _ _ b) v = b v
+    step _ _ = error "impossible"
+{-# INLINE finalCod #-}
 
 piSwaps :: Int -> Iso
 piSwaps = \case
@@ -158,9 +140,8 @@ data SigmaGen = SigmaGen
 data ProjChoice = ProjChoice
   { name :: Name,
     proj1 :: VTyp,
-    proj2 :: Value -> VTyp,
     iso :: Iso,
-    next :: Maybe (Value -> SigmaGen)
+    next :: Either (Value -> VTyp) (Value -> SigmaGen)
   }
 
 initSigmaGen :: Level -> VSigmaArg -> SigmaGen
@@ -176,18 +157,8 @@ initSigmaGen l (VSigmaArg x a b) = do
     sz = sizeofPrimArray deps
 
     depMasks l' = \case
-      VSigma _ a b -> do
-        let mask = depMask l' a
-        mask : depMasks (l' + 1) (b $ VVar l')
-      a -> do
-        let mask = depMask l' a
-        [mask]
-
-    depMask l' =
-      IS.foldl'
-        (\mask x -> setBit mask (x - coerce l))
-        (0 :: Int)
-        . levelsBetween l l'
+      VSigma _ a b -> levelsBetween l l' a : depMasks (l' + 1) (b $ VVar l')
+      a -> [levelsBetween l l' a]
 
 projChoices :: SigmaGen -> [ProjChoice]
 projChoices SigmaGen {..} = unfoldr' step (0, orig)
@@ -209,12 +180,11 @@ projChoices SigmaGen {..} = unfoldr' step (0, orig)
                 sigmaSwaps
                   (if i == sz - 1 then Comm else SigmaSwap)
                   (popCount (remaining .&. (bit i - 1)))
-              proj2 ~w = do
-                let subst' = bind i w subst
-                currentProj2 original subst' remaining'
               next
-                | popCount remaining' <= 1 = Nothing
-                | otherwise = Just \ ~w -> do
+                | popCount remaining' <= 1 = Left \ ~w -> do
+                    let subst' = bind i w subst
+                    finalProj original subst' (countTrailingZeros remaining')
+                | otherwise = Right \ ~w -> do
                     let subst' = bind i w subst
                     SigmaGen {remaining = remaining', subst = subst', ..}
           case t of
@@ -227,17 +197,16 @@ projChoices SigmaGen {..} = unfoldr' step (0, orig)
           _ -> Skip (i + 1, error "impossible")
 {-# INLINE projChoices #-}
 
-currentProj2 :: VSigmaArg -> SmallArray Value -> Int -> VTyp
-currentProj2 (VSigmaArg x a b) subst rem =
-  ifoldrSmallArray step id subst (VSigma x a b)
+finalProj :: VSigmaArg -> SmallArray Value -> Int -> VTyp
+finalProj (VSigmaArg x a b) subst j =
+  either id id $ ifoldlSmallArrayM' step (VSigma x a b) subst
   where
-    step i v k = \case
-      VSigma y a b
-        | not (testBit rem i) -> k (b v)
-        | rem `unsafeShiftR` (i + 1) == 0 -> a
-        | otherwise -> VSigma y a \ ~w -> k (b w)
+    step i t v = case t of
+      VSigma _ a b
+        | i == j -> Left a
+        | otherwise -> Right (b v)
       _ -> error "impossible"
-{-# INLINE currentProj2 #-}
+{-# INLINE finalProj #-}
 
 sigmaSwaps :: Iso -> Int -> Iso
 sigmaSwaps last = \case

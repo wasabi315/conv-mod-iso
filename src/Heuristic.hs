@@ -35,10 +35,10 @@ refinePi l gen = do
   -- maximumBy takes the rightmost one on tie but we want the leftmost for smaller Iso
   let DomChoice {..} = minimumBy (comparing \c -> Down (size l c.dom)) (domChoices gen)
   case next of
-    Nothing -> do
+    Left cod -> do
       let pi = Pi name (quote l dom) (quote (l + 1) (cod (VVar l)))
       (pi, iso)
-    Just gen -> do
+    Right gen -> do
       let (rest, iso') = refinePi (l + 1) (gen (VVar l))
           pi = Pi name (quote l dom) rest
           iso'' = iso <> piCongR iso'
