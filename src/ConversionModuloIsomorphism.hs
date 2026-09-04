@@ -3,7 +3,7 @@ module ConversionModuloIsomorphism where
 import Common
 import Evaluation
 import Isomorphism
-import PiGenerator
+import Permutation
 import Term
 import Value
 import Prelude hiding (curry)

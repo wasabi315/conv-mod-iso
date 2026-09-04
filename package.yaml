@@ -35,9 +35,11 @@ dependencies:
 
 default-extensions:
   - BlockArguments
+  - DataKinds
   - DeriveAnyClass
   - DerivingStrategies
   - DerivingVia
+  - DuplicateRecordFields
   - LambdaCase
   - MagicHash
   - NoFieldSelectors
@@ -94,12 +96,10 @@ tests:
   conv-mod-iso-test:
     main: Spec.hs
     source-dirs: test
-    ghc-options:
-      - -threaded
-      - -rtsopts
-      - -with-rtsopts= "-A64M -s -N4"
     dependencies:
       - conv-mod-iso
+      - tasty
+      - tasty-hunit
 
 benchmarks:
   conv-mod-iso-bench:

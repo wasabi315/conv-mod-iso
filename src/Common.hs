@@ -113,6 +113,15 @@ mergeSmallArray xs ys = runSmallArray do
   pure zs
 {-# INLINEABLE mergeSmallArray #-}
 
+ifoldrSmallArray :: (Int -> a -> b -> b) -> b -> SmallArray a -> b
+ifoldrSmallArray f z arr = do
+  let sz = sizeofSmallArray arr
+      go i
+        | i == sz = z
+        | (# x #) <- indexSmallArray## arr i = f i x (go (i + 1))
+  go 0
+{-# INLINE ifoldrSmallArray #-}
+
 everyNth :: Int -> [a] -> [a]
 everyNth n xs
   | n <= 0 = []

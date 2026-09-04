@@ -9,7 +9,7 @@ import Data.Monoid
 import Data.Primitive.SmallArray
 import Evaluation
 import Isomorphism
-import PiGenerator
+import Permutation
 import Pretty
 import Value
 import Prelude hiding (curry, lookup)
