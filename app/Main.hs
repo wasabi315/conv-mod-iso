@@ -6,12 +6,11 @@ import Control.Monad
 import ConversionModuloIsomorphism
 import Data.ByteString qualified as BS
 import Data.Time.Clock
-import Evaluation
+import Examples
 import Heuristic
 import Isomorphism
 import System.Environment
 import Term
-import Value
 
 --------------------------------------------------------------------------------
 
@@ -21,6 +20,9 @@ main =
     ["gen"] -> do
       let ts = everyNth 5000 $ map fst $ permute0 compSquareH
       BS.writeFile "bench.bin" (flat ts)
+    ["gen-uncurried"] -> do
+      let ts = everyNth 5000 $ map fst $ permute0 compSquareHUncurried
+      BS.writeFile "bench-uncurried.bin" (flat ts)
     ["bench1"] -> do
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
       ts <- evaluate $ force ts
