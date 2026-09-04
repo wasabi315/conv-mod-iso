@@ -1,8 +1,8 @@
 module Value where
 
+import Common
 import Data.SkewList.Lazy (SkewList)
 import Data.SkewList.Lazy qualified as SL
-import Common
 import Data.String
 
 --------------------------------------------------------------------------------
@@ -40,6 +40,9 @@ type Env = SkewList Value
 
 emptyEnv :: Env
 emptyEnv = SL.empty
+
+idEnv :: Level -> Env
+idEnv n = SL.fromList [VVar k | k <- [n - 1, n - 2 .. 0]]
 
 data VPiArg = VPiArg Name Value (Value -> Value)
 

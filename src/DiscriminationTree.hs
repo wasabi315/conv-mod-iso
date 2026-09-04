@@ -166,21 +166,16 @@ isoTrie' l t k = case t of
   _ -> reflTrie l t (k Refl)
 
 isoTriePi :: Level -> VPiArg -> (Iso -> Trie a) -> Trie a
-isoTriePi l pi k = isoTriePiGen l (initPiGen l pi) k
+isoTriePi l pi k = do
+  let (pi', j) = curryAll l pi
+  isoTriePiGen l (initPiGen l (evalPi (idEnv l) pi')) \i -> k $! j <> i
 
 isoTriePiGen :: Level -> PiGen -> (Iso -> Trie a) -> Trie a
 isoTriePiGen l gen k =
   One TPi do
-    flip foldMap'' (domChoices gen) \DomChoice {..} -> case dom of
-      VSigma y a1 a2 ->
-        flip foldMap'' (curryDom l name (VSigmaArg y a1 a2) cod) \(VPiArg _ a1 cod', j) -> do
-          let i' = iso <> j
-          isoTrie' l a1 \ia -> do
-            let ~u = transportInv ia (VVar l)
-            -- cod' is pi, so isoTrie' restarts the generator for it
-            isoTrie' (l + 1) (cod' u) \ib ->
-              k $! i' <> piCongL ia <> piCongR ib
-      a -> isoTrie' l a \ia -> do
+    -- dom is never a sigma here: 'isoTriePi' flattened the telescope
+    flip foldMap'' (domChoices gen) \DomChoice {..} ->
+      isoTrie' l dom \ia -> do
         let ~u = transportInv ia (VVar l)
             sub ib = k $! iso <> piCongL ia <> piCongR ib
         case next of

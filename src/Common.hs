@@ -141,4 +141,4 @@ newtype Index = Index Int
   deriving anyclass (NFData, Flat)
 
 newtype Level = Level Int
-  deriving newtype (Eq, Ord, Num, Show, Ix)
+  deriving newtype (Eq, Ord, Num, Show, Ix, Enum, Bounded)

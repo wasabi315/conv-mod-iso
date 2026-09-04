@@ -20,3 +20,5 @@ data Term
   deriving anyclass (NFData, Flat)
 
 type Typ = Term
+
+data PiArg = PiArg Name Typ Typ

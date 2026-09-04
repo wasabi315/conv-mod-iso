@@ -147,6 +147,26 @@ curry = go Refl
         go (i <> Curry) $ VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
       t -> (t, i)
 
+-- | Curry all top-level pis. Does not curry higher-order arguments.
+curryAll :: Level -> VPiArg -> (PiArg, Iso)
+curryAll = \l pi -> case goPi Refl l pi of
+  (Pi x a b, i) -> (PiArg x a b, i)
+  _ -> error "impossible"
+  where
+    go l = \case
+      VPi x a b -> goPi Refl l (VPiArg x a b)
+      a -> (quote l a, Refl)
+
+    goPi i l (VPiArg x a b) = case a of
+      VSigma y a1 a2 ->
+        goPi (i <> Curry) l $ VPiArg y a1 \ ~u -> VPi x (a2 u) \ ~v -> b (VPair u v)
+      a -> do
+        let a' = quote l a
+            (b', j) = go (l + 1) (b $ VVar l)
+            pi = Pi x a' b'
+            k = i <> piCongR j
+        (pi, k)
+
 -- | associate until the first projection becomes non-sigma
 assoc :: VSigmaArg -> (VSigmaArg, Iso)
 assoc = go Refl

@@ -21,6 +21,10 @@ eval env = \case
   Fst t -> vfst (eval env t)
   Snd t -> vsnd (eval env t)
 
+evalPi :: Env -> PiArg -> VPiArg
+evalPi env (PiArg x a b) = VPiArg x (eval env a) \ ~v -> eval (SL.cons v env) b
+{-# INLINE evalPi #-}
+
 ($$) :: Value -> Value -> Value
 t $$ u = case t of
   VLam _ f -> f u
