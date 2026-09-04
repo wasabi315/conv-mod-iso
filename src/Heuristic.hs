@@ -7,7 +7,7 @@ import Data.List (minimumBy)
 import Data.Ord
 import Evaluation
 import Isomorphism
-import PiGenerator
+import Permutation
 import Term
 import Value
 

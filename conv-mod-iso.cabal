@@ -37,9 +37,10 @@ library
       ConversionModuloIsomorphism
       DiscriminationTree
       Evaluation
+      Examples
       Heuristic
       Isomorphism
-      PiGenerator
+      Permutation
       Pretty
       Term
       Value
@@ -49,9 +50,11 @@ library
       src
   default-extensions:
       BlockArguments
+      DataKinds
       DeriveAnyClass
       DerivingStrategies
       DerivingVia
+      DuplicateRecordFields
       LambdaCase
       MagicHash
       NoFieldSelectors
@@ -91,9 +94,11 @@ executable conv-mod-iso
       app
   default-extensions:
       BlockArguments
+      DataKinds
       DeriveAnyClass
       DerivingStrategies
       DerivingVia
+      DuplicateRecordFields
       LambdaCase
       MagicHash
       NoFieldSelectors
@@ -135,9 +140,11 @@ test-suite conv-mod-iso-test
       test
   default-extensions:
       BlockArguments
+      DataKinds
       DeriveAnyClass
       DerivingStrategies
       DerivingVia
+      DuplicateRecordFields
       LambdaCase
       MagicHash
       NoFieldSelectors
@@ -150,7 +157,7 @@ test-suite conv-mod-iso-test
       Strict
       UnboxedTuples
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2 -threaded -rtsopts -with-rtsopts= "-A64M -s -N4"
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-name-shadowing -O2
   build-depends:
       base >=4.7 && <5
     , bytestring
@@ -163,6 +170,8 @@ test-suite conv-mod-iso-test
     , parallel
     , primitive
     , skew-list
+    , tasty
+    , tasty-hunit
     , time
   default-language: GHC2021
   if flag(dump)
@@ -179,9 +188,11 @@ benchmark conv-mod-iso-bench
       bench
   default-extensions:
       BlockArguments
+      DataKinds
       DeriveAnyClass
       DerivingStrategies
       DerivingVia
+      DuplicateRecordFields
       LambdaCase
       MagicHash
       NoFieldSelectors
