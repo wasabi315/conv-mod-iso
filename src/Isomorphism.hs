@@ -109,15 +109,15 @@ transport i v = case i of
   Refl -> v
   Sym i -> transportInv i v
   Trans i j -> transport j (transport i v)
-  Assoc -> vfst (vfst v) `VPair` (vsnd (vfst v) `VPair` vsnd v)
-  Comm -> vsnd v `VPair` vfst v
-  SigmaSwap -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
+  Assoc -> v._1._1 `VPair` (v._1._2 `VPair` v._2)
+  Comm -> v._2 `VPair` v._1
+  SigmaSwap -> v._2._1 `VPair` (v._1 `VPair` v._2._2)
   Curry -> VLam "x" \x -> VLam "y" \y -> v $$ VPair x y
   PiSwap -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
   PiCongL i -> VLam "x" \x -> v $$ transportInv i x
   PiCongR i -> VLam "x" \x -> transport i (v $$ x)
-  SigmaCongL i -> transport i (vfst v) `VPair` vsnd v
-  SigmaCongR i -> vfst v `VPair` transport i (vsnd v)
+  SigmaCongL i -> transport i v._1 `VPair` v._2
+  SigmaCongR i -> v._1 `VPair` transport i v._2
 
 -- | transport back a value @v : B@ along an isomorphism @i : A ~ B@
 transportInv :: Iso -> Value -> Value
@@ -125,15 +125,15 @@ transportInv i v = case i of
   Refl -> v
   Sym i -> transport i v
   Trans i j -> transportInv i (transportInv j v)
-  Assoc -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
-  Comm -> vsnd v `VPair` vfst v
-  SigmaSwap -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
+  Assoc -> (v._1 `VPair` v._2._1) `VPair` v._2._2
+  Comm -> v._2 `VPair` v._1
+  SigmaSwap -> v._2._1 `VPair` (v._1 `VPair` v._2._2)
   Curry -> VLam "p" \p -> v $$ vfst p $$ vsnd p
   PiSwap -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
   PiCongL i -> VLam "x" \x -> v $$ transport i x
   PiCongR i -> VLam "x" \x -> transportInv i (v $$ x)
-  SigmaCongL i -> transportInv i (vfst v) `VPair` vsnd v
-  SigmaCongR i -> vfst v `VPair` transportInv i (vsnd v)
+  SigmaCongL i -> transportInv i v._1 `VPair` v._2
+  SigmaCongR i -> v._1 `VPair` transportInv i v._2
 
 --------------------------------------------------------------------------------
 -- Rewriting types
@@ -325,6 +325,34 @@ normaliseSigma l q = do
       (ta, ia) = normalise l a
       (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
   Sigma x ta tb // i <> sigmaCongL ia <> sigmaCongR ib
+
+--------------------------------------------------------------------------------
+-- Permutation
+
+permute0 :: Term -> [(Term, Iso)]
+permute0 t = permute 0 (eval emptyEnv t)
+
+permute :: Level -> Value -> [(Term, Iso)]
+permute l = \case
+  VPi x a b -> permutePi l (VPiArg x a b)
+  VSigma x a b -> permuteSigma l (VSigmaArg x a b)
+  v -> pure $! quote l v // Refl
+
+permutePi :: Level -> VPiArg -> [(Term, Iso)]
+permutePi l q = do
+  (VPiArg x a b, i) <- pickUpDomain l q
+  (a, ia) <- permute l a
+  let v = transportInv ia (VVar l)
+  (b, ib) <- permute (l + 1) (b v)
+  pure $! Pi x a b // i <> piCongL ia <> piCongR ib
+
+permuteSigma :: Level -> VSigmaArg -> [(Term, Iso)]
+permuteSigma l q = do
+  (VSigmaArg x a b, i) <- pickUpProjection l q
+  (a, ia) <- permute l a
+  let v = transportInv ia (VVar l)
+  (b, ib) <- permute (l + 1) (b v)
+  pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 -- Normalisation + Permutation

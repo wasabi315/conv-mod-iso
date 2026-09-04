@@ -22,3 +22,11 @@ data Term
 type Typ = Term
 
 data PiArg = PiArg Name Typ Typ
+
+instance HasField "_1" Term Term where
+  getField = Fst
+  {-# INLINE getField #-}
+
+instance HasField "_2" Term Term where
+  getField = Snd
+  {-# INLINE getField #-}

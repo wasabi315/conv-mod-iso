@@ -25,27 +25,6 @@ evalPi :: Env -> PiArg -> VPiArg
 evalPi env (PiArg x a b) = VPiArg x (eval env a) \ ~v -> eval (SL.cons v env) b
 {-# INLINE evalPi #-}
 
-($$) :: Value -> Value -> Value
-t $$ u = case t of
-  VLam _ f -> f u
-  VRigid x sp -> VRigid x (SApp sp u)
-  VTop x sp -> VTop x (SApp sp u)
-  _ -> error "($$): not a lambda"
-
-vfst :: Value -> Value
-vfst = \case
-  VPair t _ -> t
-  VRigid x sp -> VRigid x (SFst sp)
-  VTop x sp -> VTop x (SFst sp)
-  _ -> error "vfst: not a pair"
-
-vsnd :: Value -> Value
-vsnd = \case
-  VPair _ t -> t
-  VRigid x sp -> VRigid x (SSnd sp)
-  VTop x sp -> VTop x (SSnd sp)
-  _ -> error "vsnd: not a pair"
-
 --------------------------------------------------------------------------------
 
 quote :: Level -> Value -> Term

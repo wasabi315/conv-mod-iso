@@ -2,6 +2,7 @@ module Common
   ( module Common,
     module Control.Parallel.Strategies,
     module Lens.Micro.Platform,
+    module GHC.Records,
     coerce,
     force,
     Flat,
@@ -20,6 +21,7 @@ import Data.Monoid
 import Data.Primitive.SmallArray
 import Flat
 import GHC.Exts
+import GHC.Records
 import Lens.Micro.Platform
 
 --------------------------------------------------------------------------------
@@ -110,6 +112,13 @@ mergeSmallArray xs ys = runSmallArray do
   go 0 0 0
   pure zs
 {-# INLINEABLE mergeSmallArray #-}
+
+everyNth :: Int -> [a] -> [a]
+everyNth n xs
+  | n <= 0 = []
+  | otherwise = case drop (n - 1) xs of
+      y : ys -> y : everyNth n ys
+      [] -> []
 
 -- Prelude's foldMap' doesn't inline
 foldMap'' :: (Monoid m, Foldable t) => (a -> m) -> t a -> m
