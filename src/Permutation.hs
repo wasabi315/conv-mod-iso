@@ -16,7 +16,10 @@ import Common
 import Data.Bits
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
+import Data.SkewList.Lazy qualified as SL
+import Evaluation
 import Isomorphism
+import Term
 import Value
 
 --------------------------------------------------------------------------------
@@ -49,13 +52,15 @@ levelsBetween from to = go to
 -- Generator of all dependency-respecting orders of a Pi telescope's domains
 
 data PiGen = PiGen
-  { original :: {-# UNPACK #-} VPiArg,
+  { names :: {-# UNPACK #-} SmallArray Name,
+    -- quoted domains weakened to the same context as cod
+    doms :: {-# UNPACK #-} SmallArray Term,
+    cod :: Term,
     -- dependency mask per original position
     depMasks :: {-# UNPACK #-} PrimArray Int,
     -- mask of not-yet-emitted positions
     remaining :: {-# UNPACK #-} Int,
-    -- substitution per original position, placeholder elsewhere
-    subst :: {-# UNPACK #-} SmallArray Value
+    env :: Env
   }
 
 data DomChoice = DomChoice
@@ -66,55 +71,49 @@ data DomChoice = DomChoice
   }
 
 initPiGen :: Level -> VPiArg -> PiGen
-initPiGen l (VPiArg x a b) =
-  PiGen
-    { original = VPiArg x a b,
-      depMasks = deps,
-      remaining = (1 `unsafeShiftL` sz) - 1,
-      subst = runSmallArray (newSmallArray sz Placeholder)
-    }
+initPiGen l (VPiArg x a b) = go l id id id (idEnv l) (VPi x a b)
   where
-    deps = primArrayFromList $ 0 : depMasks (l + 1) (b $ VVar l)
-    sz = sizeofPrimArray deps
-
-    depMasks l' = \case
-      VPi _ a b -> levelsBetween l l' a : depMasks (l' + 1) (b $ VVar l')
-      _ -> []
+    go l' nameAcc domAcc depsAcc env = \case
+      VPi x a b ->
+        go
+          (l' + 1)
+          (nameAcc . (x :))
+          (domAcc . (a :))
+          (depsAcc . (levelsBetween l l' a :))
+          (SL.cons Placeholder env)
+          (b (VVar l'))
+      a -> do
+        let Level n = l' - l
+            names = smallArrayFromListN n (nameAcc [])
+            doms = smallArrayFromListN n (map (quote l') (domAcc []))
+            cod = quote l' a
+            depMasks = primArrayFromListN n (depsAcc [])
+            remaining = bit n - 1
+        PiGen {..}
 
 domChoices :: PiGen -> [DomChoice]
-domChoices PiGen {..} = unfoldr' step (0, orig)
+domChoices PiGen {..} = unfoldr' step 0
   where
-    sz = sizeofPrimArray depMasks
-    orig = case original of VPiArg x a b -> VPi x a b
+    n = sizeofSmallArray doms
 
-    step (!i, t)
-      | i >= sz = Done
+    step !i
+      | i >= n = Done
       | testBit remaining i,
         (indexPrimArray depMasks i .&. remaining) == 0 = do
           let remaining' = clearBit remaining i
               iso = piSwaps $ popCount (remaining .&. (bit i - 1))
+              (# name #) = indexSmallArray## names i
+              dom = eval env (indexSmallArray doms i)
               next
-                | remaining' == 0 = Left \ ~w -> do
-                    let subst' = updateSmallArray i w subst
-                    finalCod original subst'
-                | otherwise = Right \ ~w -> do
-                    let subst' = updateSmallArray i w subst
-                    PiGen {remaining = remaining', subst = subst', ..}
-              VPi name dom b = t
-              (# v #) = indexSmallArray## subst i
-          Yield DomChoice {..} (i + 1, b v)
-      | otherwise = do
-          let VPi _ _ b = t
-              (# v #) = indexSmallArray## subst i
-          Skip (i + 1, b v)
+                | remaining' == 0 = Left \ ~v -> do
+                    let env' = SL.adjust (n - 1 - i) (const v) env
+                    eval env' cod
+                | otherwise = Right \ ~v -> do
+                    let env' = SL.adjust (n - 1 - i) (const v) env
+                    PiGen {remaining = remaining', env = env', ..}
+          Yield DomChoice {..} (i + 1)
+      | otherwise = Skip (i + 1)
 {-# INLINE domChoices #-}
-
-finalCod :: VPiArg -> SmallArray Value -> VTyp
-finalCod (VPiArg x a b) subst = foldl' step (VPi x a b) subst
-  where
-    step (VPi _ _ b) v = b v
-    step _ _ = error "impossible"
-{-# INLINE finalCod #-}
 
 piSwaps :: Int -> Iso
 piSwaps = \case
@@ -128,85 +127,75 @@ piSwaps = \case
 --------------------------------------------------------------------------------
 
 data SigmaGen = SigmaGen
-  { original :: {-# UNPACK #-} VSigmaArg,
+  { names :: {-# UNPACK #-} SmallArray Name,
+    -- quoted projections weakened to the same context as the last projection
+    projs :: {-# UNPACK #-} SmallArray Term,
     -- dependency mask per original position
     depMasks :: {-# UNPACK #-} PrimArray Int,
     -- mask of not-yet-emitted positions
     remaining :: {-# UNPACK #-} Int,
-    -- substitution per original position, placeholder elsewhere
-    subst :: {-# UNPACK #-} SmallArray Value
+    env :: Env
   }
 
 data ProjChoice = ProjChoice
   { name :: Name,
-    proj1 :: VTyp,
+    proj :: VTyp,
     iso :: Iso,
     next :: Either (Value -> VTyp) (Value -> SigmaGen)
   }
 
 initSigmaGen :: Level -> VSigmaArg -> SigmaGen
-initSigmaGen l (VSigmaArg x a b) = do
-  SigmaGen
-    { original = VSigmaArg x a b,
-      depMasks = deps,
-      remaining = (1 `unsafeShiftL` sz) - 1,
-      subst = runSmallArray (newSmallArray (sz - 1) Placeholder) -- beware -1!
-    }
+initSigmaGen l (VSigmaArg x a b) = go l id id id (idEnv l) (VSigma x a b)
   where
-    deps = primArrayFromList $ 0 : depMasks (l + 1) (b $ VVar l)
-    sz = sizeofPrimArray deps
-
-    depMasks l' = \case
-      VSigma _ a b -> levelsBetween l l' a : depMasks (l' + 1) (b $ VVar l')
-      a -> [levelsBetween l l' a]
+    go l' nameAcc projAcc depsAcc env = \case
+      VSigma x a b ->
+        go
+          (l' + 1)
+          (nameAcc . (x :))
+          (projAcc . (a :))
+          (depsAcc . (levelsBetween l l' a :))
+          (SL.cons Placeholder env)
+          (b (VVar l'))
+      a -> do
+        let Level n = l' - l
+            names = smallArrayFromListN (n + 1) (nameAcc ["_"])
+            projs = smallArrayFromListN (n + 1) (map (quote l') (projAcc [a]))
+            depMasks = primArrayFromListN (n + 1) (depsAcc [levelsBetween l l' a])
+            remaining = bit (n + 1) - 1
+        SigmaGen {..}
 
 projChoices :: SigmaGen -> [ProjChoice]
-projChoices SigmaGen {..} = unfoldr' step (0, orig)
+projChoices SigmaGen {..} = unfoldr' step 0
   where
-    sz = sizeofPrimArray depMasks
-    orig = case original of VSigmaArg x a b -> VSigma x a b
+    n = sizeofSmallArray projs
 
-    bind i w sub
-      | i < sizeofSmallArray sub = updateSmallArray i w sub
-      | otherwise = sub
+    bind i w e
+      | i < n - 1 = SL.adjust (n - 2 - i) (const w) e
+      | otherwise = e
     {-# INLINE bind #-}
 
-    step (!i, t)
-      | i >= sz = Done
+    step !i
+      | i >= n = Done
       | testBit remaining i,
         (indexPrimArray depMasks i .&. remaining) == 0 = do
           let remaining' = clearBit remaining i
               iso =
                 sigmaSwaps
-                  (if i == sz - 1 then Comm else SigmaSwap)
+                  (if i == n - 1 then Comm else SigmaSwap)
                   (popCount (remaining .&. (bit i - 1)))
+              (# name #) = indexSmallArray## names i
+              proj = eval env (indexSmallArray projs i)
               next
-                | popCount remaining' <= 1 = Left \ ~w -> do
-                    let subst' = bind i w subst
-                    finalProj original subst' (countTrailingZeros remaining')
-                | otherwise = Right \ ~w -> do
-                    let subst' = bind i w subst
-                    SigmaGen {remaining = remaining', subst = subst', ..}
-          case t of
-            VSigma name proj1 b
-              | (# v #) <- indexSmallArray## subst i -> Yield ProjChoice {..} (i + 1, b v)
-            proj1 -> Yield ProjChoice {name = "_", ..} (i + 1, error "impossible")
-      | otherwise = case t of
-          VSigma _ _ b
-            | (# v #) <- indexSmallArray## subst i -> Skip (i + 1, b v)
-          _ -> Skip (i + 1, error "impossible")
+                | popCount remaining' <= 1 = Left \ ~v -> do
+                    let env' = bind i v env
+                        (# proj #) = indexSmallArray## projs (countTrailingZeros remaining')
+                    eval env' proj
+                | otherwise = Right \ ~v -> do
+                    let env' = bind i v env
+                    SigmaGen {remaining = remaining', env = env', ..}
+          Yield ProjChoice {..} (i + 1)
+      | otherwise = Skip (i + 1)
 {-# INLINE projChoices #-}
-
-finalProj :: VSigmaArg -> SmallArray Value -> Int -> VTyp
-finalProj (VSigmaArg x a b) subst j =
-  either id id $ ifoldlSmallArrayM' step (VSigma x a b) subst
-  where
-    step i t v = case t of
-      VSigma _ a b
-        | i == j -> Left a
-        | otherwise -> Right (b v)
-      _ -> error "impossible"
-{-# INLINE finalProj #-}
 
 sigmaSwaps :: Iso -> Int -> Iso
 sigmaSwaps last = \case

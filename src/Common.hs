@@ -47,17 +47,6 @@ updateSmallArray i ~x xs = runSmallArray do
   pure ys
 {-# INLINE updateSmallArray #-}
 
-ifoldlSmallArrayM' :: (Monad m) => (Int -> b -> a -> m b) -> b -> SmallArray a -> m b
-ifoldlSmallArrayM' f z arr = do
-  let sz = sizeofSmallArray arr
-      go i acc
-        | i == sz = pure acc
-        | (# x #) <- indexSmallArray## arr i = do
-            acc <- f i acc x
-            go (i + 1) acc
-  go 0 z
-{-# INLINE ifoldlSmallArrayM' #-}
-
 everyNth :: Int -> [a] -> [a]
 everyNth n xs
   | n <= 0 = []
