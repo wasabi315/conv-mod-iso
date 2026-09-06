@@ -16,7 +16,6 @@ import Common
 import Data.Bits
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
-import Data.SkewList.Lazy qualified as SL
 import Evaluation
 import Isomorphism
 import Term
@@ -56,11 +55,13 @@ data PiGen = PiGen
     -- quoted domains weakened to the same context as cod
     doms :: {-# UNPACK #-} SmallArray Term,
     cod :: Term,
+    -- constitute closures together with each element of doms and cod
+    env :: SmallArray Value,
+    level :: Level,
     -- dependency mask per original position
     depMasks :: {-# UNPACK #-} PrimArray Int,
     -- mask of not-yet-emitted positions
-    remaining :: {-# UNPACK #-} Int,
-    env :: Env
+    remaining :: {-# UNPACK #-} Int
   }
 
 data DomChoice = DomChoice
@@ -71,22 +72,22 @@ data DomChoice = DomChoice
   }
 
 initPiGen :: Level -> VPiArg -> PiGen
-initPiGen l (VPiArg x a b) = go l id id id (idEnv l) (VPi x a b)
+initPiGen level (VPiArg x a b) = go level id id id (VPi x a b)
   where
-    go l' nameAcc domAcc depsAcc env = \case
+    go l nameAcc domAcc depsAcc = \case
       VPi x a b ->
         go
-          (l' + 1)
+          (l + 1)
           (nameAcc . (x :))
           (domAcc . (a :))
-          (depsAcc . (levelsBetween l l' a :))
-          (SL.cons Placeholder env)
-          (b (VVar l'))
+          (depsAcc . (levelsBetween level l a :))
+          (b (VVar l))
       a -> do
-        let Level n = l' - l
+        let Level n = l - level
             names = smallArrayFromListN n (nameAcc [])
-            doms = smallArrayFromListN n (map (quote l') (domAcc []))
-            cod = quote l' a
+            doms = smallArrayFromListN n (map (quote l) (domAcc []))
+            cod = quote l a
+            env = runSmallArray (newSmallArray n Placeholder)
             depMasks = primArrayFromListN n (depsAcc [])
             remaining = bit n - 1
         PiGen {..}
@@ -103,13 +104,13 @@ domChoices PiGen {..} = unfoldr' step 0
           let remaining' = clearBit remaining i
               iso = piSwaps $ popCount (remaining .&. (bit i - 1))
               (# name #) = indexSmallArray## names i
-              dom = eval env (indexSmallArray doms i)
+              dom = eval (level :>> env) (indexSmallArray doms i)
               next
                 | remaining' == 0 = Left \ ~v -> do
-                    let env' = SL.adjust (n - 1 - i) (const v) env
-                    eval env' cod
+                    let env' = updateSmallArray (n - i - 1) v env
+                    eval (level :>> env') cod
                 | otherwise = Right \ ~v -> do
-                    let env' = SL.adjust (n - 1 - i) (const v) env
+                    let env' = updateSmallArray (n - i - 1) v env
                     PiGen {remaining = remaining', env = env', ..}
           Yield DomChoice {..} (i + 1)
       | otherwise = Skip (i + 1)
@@ -130,11 +131,13 @@ data SigmaGen = SigmaGen
   { names :: {-# UNPACK #-} SmallArray Name,
     -- quoted projections weakened to the same context as the last projection
     projs :: {-# UNPACK #-} SmallArray Term,
+    -- constitute closures together with each element of projs
+    env :: SmallArray Value,
+    level :: Level,
     -- dependency mask per original position
     depMasks :: {-# UNPACK #-} PrimArray Int,
     -- mask of not-yet-emitted positions
-    remaining :: {-# UNPACK #-} Int,
-    env :: Env
+    remaining :: {-# UNPACK #-} Int
   }
 
 data ProjChoice = ProjChoice
@@ -145,22 +148,22 @@ data ProjChoice = ProjChoice
   }
 
 initSigmaGen :: Level -> VSigmaArg -> SigmaGen
-initSigmaGen l (VSigmaArg x a b) = go l id id id (idEnv l) (VSigma x a b)
+initSigmaGen level (VSigmaArg x a b) = go level id id id (VSigma x a b)
   where
-    go l' nameAcc projAcc depsAcc env = \case
+    go l nameAcc projAcc depsAcc = \case
       VSigma x a b ->
         go
-          (l' + 1)
+          (l + 1)
           (nameAcc . (x :))
           (projAcc . (a :))
-          (depsAcc . (levelsBetween l l' a :))
-          (SL.cons Placeholder env)
-          (b (VVar l'))
+          (depsAcc . (levelsBetween level l a :))
+          (b (VVar l))
       a -> do
-        let Level n = l' - l
+        let Level n = l - level
             names = smallArrayFromListN (n + 1) (nameAcc ["_"])
-            projs = smallArrayFromListN (n + 1) (map (quote l') (projAcc [a]))
-            depMasks = primArrayFromListN (n + 1) (depsAcc [levelsBetween l l' a])
+            projs = smallArrayFromListN (n + 1) (map (quote l) (projAcc [a]))
+            env = runSmallArray (newSmallArray n Placeholder)
+            depMasks = primArrayFromListN (n + 1) (depsAcc [levelsBetween level l a])
             remaining = bit (n + 1) - 1
         SigmaGen {..}
 
@@ -169,8 +172,8 @@ projChoices SigmaGen {..} = unfoldr' step 0
   where
     n = sizeofSmallArray projs
 
-    bind i w e
-      | i < n - 1 = SL.adjust (n - 2 - i) (const w) e
+    bind i v e
+      | i < n - 1 = updateSmallArray (n - 2 - i) v e
       | otherwise = e
     {-# INLINE bind #-}
 
@@ -184,12 +187,12 @@ projChoices SigmaGen {..} = unfoldr' step 0
                   (if i == n - 1 then Comm else SigmaSwap)
                   (popCount (remaining .&. (bit i - 1)))
               (# name #) = indexSmallArray## names i
-              proj = eval env (indexSmallArray projs i)
+              proj = eval (level :>> env) (indexSmallArray projs i)
               next
                 | popCount remaining' <= 1 = Left \ ~v -> do
                     let env' = bind i v env
                         (# proj #) = indexSmallArray## projs (countTrailingZeros remaining')
-                    eval env' proj
+                    eval (level :>> env') proj
                 | otherwise = Right \ ~v -> do
                     let env' = bind i v env
                     SigmaGen {remaining = remaining', env = env', ..}

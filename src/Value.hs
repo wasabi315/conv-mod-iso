@@ -1,8 +1,7 @@
 module Value where
 
 import Common
-import Data.SkewList.Lazy (SkewList)
-import Data.SkewList.Lazy qualified as SL
+import Data.Primitive.SmallArray
 import Data.String
 
 infixr 5 -->
@@ -42,13 +41,9 @@ data Spine
 pattern VVar :: Level -> Value
 pattern VVar x = VRigid x SNil
 
-type Env = SkewList Value
-
 data VPiArg = VPiArg Name Value (Value -> Value)
 
 data VSigmaArg = VSigmaArg Name Value (Value -> Value)
-
---------------------------------------------------------------------------------
 
 ($$) :: Value -> Value -> Value
 t $$ u = case t of
@@ -70,6 +65,8 @@ vsnd = \case
   VRigid x sp -> VRigid x (SSnd sp)
   VTop x sp -> VTop x (SSnd sp)
   _ -> error "vsnd: not a pair"
+
+-- sugars
 
 instance HasField "_1" Value Value where
   getField = vfst
@@ -104,8 +101,35 @@ a *** b = VSigma "_" a \ ~_ -> b
 instance IsString Value where
   fromString s = VTop s SNil
 
+--------------------------------------------------------------------------------
+
+data Env
+  = -- identity environent and chunk
+    -- most recent value come first in the chunk
+    {-# UNPACK #-} Level :>> {-# UNPACK #-} SmallArray Value
+  | Env :> ~Value
+
 emptyEnv :: Env
-emptyEnv = SL.empty
+emptyEnv = 0 :>> mempty
 
 idEnv :: Level -> Env
-idEnv n = SL.fromList [VVar k | k <- [n - 1, n - 2 .. 0]]
+idEnv = (:>> mempty)
+
+lookupEnv :: Env -> Index -> Value
+lookupEnv = \cases
+  (l :>> vs) i -> fastLookup l vs i
+  env i -> slowLookup env i
+  where
+    fastLookup (Level l) vs (Index x)
+      | x < sz, (# v #) <- indexSmallArray## vs x = v
+      | let x' = x - sz, x' < l = VVar (coerce $ l - x' - 1)
+      | otherwise = error "lookupEnv: index out of range"
+      where
+        sz = sizeofSmallArray vs
+    {-# INLINE fastLookup #-}
+
+    slowLookup = \cases
+      (_ :> v) 0 -> v
+      (e :> _) i -> slowLookup e (i - 1)
+      (l :>> vs) i -> fastLookup l vs i
+{-# INLINE lookupEnv #-}

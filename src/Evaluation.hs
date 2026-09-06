@@ -1,7 +1,6 @@
 module Evaluation where
 
 import Common
-import Data.SkewList.Lazy qualified as SL
 import Term
 import Value
 
@@ -10,19 +9,19 @@ import Value
 
 eval :: Env -> Term -> Value
 eval env = \case
-  Var (Index x) -> env SL.! x
+  Var x -> lookupEnv env x
   Top x -> VTop x SNil
   U -> VU
-  Pi x a b -> VPi x (eval env a) \ ~v -> eval (SL.cons v env) b
-  Lam x t -> VLam x \v -> eval (SL.cons v env) t
+  Pi x a b -> VPi x (eval env a) \ ~v -> eval (env :> v) b
+  Lam x t -> VLam x \v -> eval (env :> v) t
   t :$$ u -> eval env t $$ eval env u
-  Sigma x a b -> VSigma x (eval env a) \ ~v -> eval (SL.cons v env) b
+  Sigma x a b -> VSigma x (eval env a) \ ~v -> eval (env :> v) b
   Pair t u -> VPair (eval env t) (eval env u)
   Fst t -> vfst (eval env t)
   Snd t -> vsnd (eval env t)
 
 evalPi :: Env -> PiArg -> VPiArg
-evalPi env (PiArg x a b) = VPiArg x (eval env a) \ ~v -> eval (SL.cons v env) b
+evalPi env (PiArg x a b) = VPiArg x (eval env a) \ ~v -> eval (env :> v) b
 {-# INLINE evalPi #-}
 
 --------------------------------------------------------------------------------
