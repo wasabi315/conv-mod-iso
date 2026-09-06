@@ -105,35 +105,35 @@ sigmaCongR = \case
 
 -- | transport a value @v : A@ along an isomorphism @i : A ~ B@
 transport :: Iso -> Value -> Value
-transport i v = case i of
-  Refl -> v
-  Sym i -> transportInv i v
-  Trans i j -> transport j (transport i v)
-  Assoc -> v._1._1 `VPair` (v._1._2 `VPair` v._2)
-  Comm -> v._2 `VPair` v._1
-  SigmaSwap -> v._2._1 `VPair` (v._1 `VPair` v._2._2)
-  Curry -> VLam "x" \x -> VLam "y" \y -> v $$ VPair x y
-  PiSwap -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
-  PiCongL i -> VLam "x" \x -> v $$ transportInv i x
-  PiCongR i -> VLam "x" \x -> transport i (v $$ x)
-  SigmaCongL i -> transport i v._1 `VPair` v._2
-  SigmaCongR i -> v._1 `VPair` transport i v._2
+transport = \cases
+  Refl v -> v
+  (Sym i) v -> transportInv i v
+  (Trans i j) v -> transport j (transport i v)
+  Assoc ((u :* v) :* w) -> u :* v :* w
+  Comm (u :* v) -> v :* u
+  SigmaSwap (u :* v :* w) -> v :* u :* w
+  Curry v -> VLam "x" \x -> VLam "y" \y -> v $$ (x :* y)
+  PiSwap v -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
+  (PiCongL i) v -> VLam "x" \x -> v $$ transportInv i x
+  (PiCongR i) v -> VLam "x" \x -> transport i (v $$ x)
+  (SigmaCongL i) (u :* v) -> transport i u :* v
+  (SigmaCongR i) (u :* v) -> u `VPair` transport i v
 
 -- | transport back a value @v : B@ along an isomorphism @i : A ~ B@
 transportInv :: Iso -> Value -> Value
-transportInv i v = case i of
-  Refl -> v
-  Sym i -> transport i v
-  Trans i j -> transportInv i (transportInv j v)
-  Assoc -> (v._1 `VPair` v._2._1) `VPair` v._2._2
-  Comm -> v._2 `VPair` v._1
-  SigmaSwap -> v._2._1 `VPair` (v._1 `VPair` v._2._2)
-  Curry -> VLam "p" \p -> v $$ vfst p $$ vsnd p
-  PiSwap -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
-  PiCongL i -> VLam "x" \x -> v $$ transport i x
-  PiCongR i -> VLam "x" \x -> transportInv i (v $$ x)
-  SigmaCongL i -> transportInv i v._1 `VPair` v._2
-  SigmaCongR i -> v._1 `VPair` transportInv i v._2
+transportInv = \cases
+  Refl v -> v
+  (Sym i) v -> transport i v
+  (Trans i j) v -> transportInv i (transportInv j v)
+  Assoc (u :* v :* w) -> (u :* v) :* w
+  Comm (u :* v) -> v :* u
+  SigmaSwap (u :* v :* w) -> v :* u :* w
+  Curry v -> VLam "p" \(x :* y) -> v $$ x $$ y
+  PiSwap v -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
+  (PiCongL i) v -> VLam "x" \x -> v $$ transport i x
+  (PiCongR i) v -> VLam "x" \x -> transportInv i (v $$ x)
+  (SigmaCongL i) (u :* v) -> transportInv i u `VPair` v
+  (SigmaCongR i) (u :* v) -> u `VPair` transportInv i v
 
 --------------------------------------------------------------------------------
 -- Rewriting types
@@ -176,129 +176,25 @@ assoc = go Refl
         go (i <> Assoc) $ VSigmaArg y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
       t -> (t, i)
 
-dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
-dependsOnLevelsBetween from to = go to
+-- | Assoc all top-level sigmas
+assocAll :: Level -> VSigmaArg -> (SigmaArg, Iso)
+assocAll = \l sig -> case goSigma Refl l sig of
+  (Sigma x a b, i) -> (SigmaArg x a b, i)
+  _ -> error "impossible"
   where
     go l = \case
-      VRigid x sp -> (from <= x && x <= to) || goSpine l sp
-      VTop _ sp -> goSpine l sp
-      VU -> False
-      VPi _ a b -> go l a || goBind l b
-      VLam _ t -> goBind l t
-      VSigma _ a b -> go l a || goBind l b
-      VPair t u -> go l t || go l u
+      VSigma x a b -> goSigma Refl l (VSigmaArg x a b)
+      a -> (quote l a, Refl)
 
-    goBind l t = go (l + 1) (t $ VVar l)
-
-    goSpine l = \case
-      SNil -> False
-      SApp sp t -> goSpine l sp || go l t
-      SFst sp -> goSpine l sp
-      SSnd sp -> goSpine l sp
-
--- | Pick up a domain without breaking dependencies.
-pickUpDomain :: Level -> VPiArg -> [(VPiArg, Iso)]
-pickUpDomain l (VPiArg x a b) = (VPiArg x a b, Refl) : go l b
-  where
-    go l' c = case c (VVar l') of
-      VPi y c1 c2 ->
-        [ (VPiArg y c1 rest, s)
-        | not $ dependsOnLevelsBetween l l' c1,
-          let i = l' - l
-              rest ~vc1 = VPi x a (instPiAt i vc1 . b)
-              s = swaps i
-        ]
-          ++ go (l' + 1) c2
-      _ -> []
-
-    instPiAt = \cases
-      0 ~v (VPi _ _ b) -> b v
-      i ~v (VPi x a b) -> VPi x a (instPiAt (i - 1) v . b)
-      _ ~_ _ -> error "impossible"
-
-    swaps = \case
-      0 -> PiSwap
-      n -> piCongR (swaps (n - 1)) <> PiSwap
-
--- | Pick up a projection without breaking dependencies.
-pickUpProjection :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
-pickUpProjection l (VSigmaArg x a b) = (VSigmaArg x a b, Refl) : go l b
-  where
-    go l' c = case c (VVar l') of
-      VSigma y c1 c2 ->
-        [ (VSigmaArg y c1 rest, s)
-        | not $ dependsOnLevelsBetween l l' c1,
-          let i = l' - l
-              rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
-              s = swaps SigmaSwap i
-        ]
-          ++ go (l' + 1) c2
-      c ->
-        [ (VSigmaArg "_" c rest, s)
-        | not $ dependsOnLevelsBetween l l' c,
-          let rest ~_ = dropLastProj (l + 1) (VSigma x a b)
-              s = swaps Comm (l' - l)
-        ]
-
-    instSigmaAt = \cases
-      0 ~v (VSigma _ _ b) -> b v
-      i ~v (VSigma x a b) -> VSigma x a (instSigmaAt (i - 1) v . b)
-      _ ~_ _ -> error "impossible"
-
-    dropLastProj l = \case
-      VSigma x a b -> case b (VVar l) of
-        VSigma {} -> VSigma x a (dropLastProj (l + 1) . b)
-        _ -> a
-      _ -> error "impossible"
-
-    swaps i = \case
-      (0 :: Level) -> i
-      n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
-
--- | Pick a **non-sigma** projection without breaking dependencies.
--- This works even in the presence of arbitrarily nested sigmas in the type.
-assocSwap :: Level -> VSigmaArg -> [(VSigmaArg, Iso)]
-assocSwap l = go
-  where
-    go q = do
-      -- Pick one projection first.
-      r@(q, i) <- pickUpProjection l q
-      case q of
-        -- When the selected projection is a sigma type, we invoke
-        -- assocSwap recursively to make the first projection of the sigma non-sigma!
-        VSigmaArg x (VSigma y a b) c -> do
-          (VSigmaArg y a b, j) <- go (VSigmaArg y a b)
-          let -- Then associate to make the first projection non-sigma.
-              -- Don't forget transporting along @j@, since @assocSwap@ acted on the first projection above.
-              q = VSigmaArg y a \ ~u -> VSigma x (b u) \ ~v -> c (transportInv j (VPair u v))
-              k = i <> sigmaCongL j <> Assoc
-          pure (q, k)
-        _ -> pure r
-
-curryDom :: Level -> Name -> VSigmaArg -> (Value -> VTyp) -> [(VPiArg, Iso)]
-curryDom l x (VSigmaArg y a b) c =
-  [ ( VPiArg y a \ ~u -> VPi x (b u) \ ~v -> c (transportInv j (VPair u v)),
-      piCongL j <> Curry
-    )
-  | (VSigmaArg y a b, j) <- assocSwap l (VSigmaArg y a b)
-  ]
-{-# INLINE curryDom #-}
-
--- | Pick a **non-sigma** domain without breaking dependencies.
--- This works even in the presence of arbitrarily nested sigmas in the type.
-
---   e.g) currySwap (List A → (B × A → A) × B → B) =
---          [ ( List A → (B × A → A) × B → B , Refl                    ),
---            ( (B × A → B) → B → List A → B , ΠSwap · Curry           ),
---            ( B → (B × A → B) → List A → B , ΠSwap · ΠL Comm · Curry )
---          ]
-currySwap :: Level -> VPiArg -> [(VPiArg, Iso)]
-currySwap l q = do
-  r@(q, i) <- pickUpDomain l q
-  case q of
-    VPiArg x (VSigma y a b) c ->
-      map (fmap (i <>)) $ curryDom l x (VSigmaArg y a b) c
-    _ -> pure r
+    goSigma i l (VSigmaArg x a b) = case a of
+      VSigma y a1 a2 ->
+        goSigma (i <> Assoc) l $ VSigmaArg y a1 \ ~u -> VSigma x (a2 u) \ ~v -> b (VPair u v)
+      a -> do
+        let a' = quote l a
+            (b', j) = go (l + 1) (b $ VVar l)
+            sigma = Sigma x a' b'
+            k = i <> sigmaCongR j
+        (sigma, k)
 
 --------------------------------------------------------------------------------
 -- Normalisation
@@ -325,59 +221,3 @@ normaliseSigma l q = do
       (ta, ia) = normalise l a
       (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
   Sigma x ta tb // i <> sigmaCongL ia <> sigmaCongR ib
-
---------------------------------------------------------------------------------
--- Permutation
-
-permute0 :: Term -> [(Term, Iso)]
-permute0 t = permute 0 (eval emptyEnv t)
-
-permute :: Level -> Value -> [(Term, Iso)]
-permute l = \case
-  VPi x a b -> permutePi l (VPiArg x a b)
-  VSigma x a b -> permuteSigma l (VSigmaArg x a b)
-  v -> pure $! quote l v // Refl
-
-permutePi :: Level -> VPiArg -> [(Term, Iso)]
-permutePi l q = do
-  (VPiArg x a b, i) <- pickUpDomain l q
-  (a, ia) <- permute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- permute (l + 1) (b v)
-  pure $! Pi x a b // i <> piCongL ia <> piCongR ib
-
-permuteSigma :: Level -> VSigmaArg -> [(Term, Iso)]
-permuteSigma l q = do
-  (VSigmaArg x a b, i) <- pickUpProjection l q
-  (a, ia) <- permute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- permute (l + 1) (b v)
-  pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
-
---------------------------------------------------------------------------------
--- Normalisation + Permutation
-
-normalisePermute0 :: Term -> [(Term, Iso)]
-normalisePermute0 t = normalisePermute 0 (eval emptyEnv t)
-
-normalisePermute :: Level -> Value -> [(Term, Iso)]
-normalisePermute l = \case
-  VPi x a b -> normalisePermutePi l (VPiArg x a b)
-  VSigma x a b -> normalisePermuteSigma l (VSigmaArg x a b)
-  v -> pure $! quote l v // Refl
-
-normalisePermutePi :: Level -> VPiArg -> [(Term, Iso)]
-normalisePermutePi l q = do
-  (VPiArg x a b, i) <- currySwap l q
-  (a, ia) <- normalisePermute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- normalisePermute (l + 1) (b v)
-  pure $! Pi x a b // i <> piCongL ia <> piCongR ib
-
-normalisePermuteSigma :: Level -> VSigmaArg -> [(Term, Iso)]
-normalisePermuteSigma l q = do
-  (VSigmaArg x a b, i) <- assocSwap l q
-  (a, ia) <- normalisePermute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- normalisePermute (l + 1) (b v)
-  pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib

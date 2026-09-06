@@ -8,7 +8,7 @@ import Data.ByteString qualified as BS
 import Data.Time.Clock
 import Examples
 import Heuristic
-import Isomorphism
+import Permutation
 import System.Environment
 import Term
 

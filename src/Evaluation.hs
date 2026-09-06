@@ -24,6 +24,10 @@ evalPi :: Env -> PiArg -> VPiArg
 evalPi env (PiArg x a b) = VPiArg x (eval env a) \ ~v -> eval (env :> v) b
 {-# INLINE evalPi #-}
 
+evalSigma :: Env -> SigmaArg -> VSigmaArg
+evalSigma env (SigmaArg x a b) = VSigmaArg x (eval env a) \ ~v -> eval (env :> v) b
+{-# INLINE evalSigma #-}
+
 --------------------------------------------------------------------------------
 
 quote :: Level -> Value -> Term

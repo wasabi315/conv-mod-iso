@@ -49,10 +49,19 @@ convPiG l pi gen = do
 
 convSigma :: Level -> VSigmaArg -> VSigmaArg -> [(Iso, Iso)]
 convSigma l sig sig' = do
-  let (VSigmaArg _ a b, i) = assoc sig
-  (VSigmaArg _ a' b', i') <- assocSwap l sig'
-  (ia, ia') <- convIso l a a'
+  let (sig'', k) = assocAll l sig'
+  (i, j) <- convSigmaG l sig (initSigmaGen l (evalSigma (idEnv l) sig''))
+  pure $! i // k <> j
+
+convSigmaG :: Level -> VSigmaArg -> SigmaGen -> [(Iso, Iso)]
+convSigmaG l pi gen = do
+  let (VSigmaArg _ a b, i) = assoc pi
+  ProjChoice {..} <- projChoices gen
+  (ia, ia') <- convIso l a proj
   let v = transportInv ia (VVar l)
       v' = transportInv ia' (VVar l)
-  (ib, ib') <- convIso (l + 1) (b v) (b' v')
-  pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> sigmaCongL ia' <> sigmaCongR ib'
+  (ib, ib') <- case next of
+    Left cod -> convIso (l + 1) (b v) (cod v')
+    Right gen | VSigma y c d <- b v -> convSigmaG (l + 1) (VSigmaArg y c d) (gen v')
+    _ -> []
+  pure $! i <> sigmaCongL ia <> sigmaCongR ib // iso <> sigmaCongL ia' <> sigmaCongR ib'

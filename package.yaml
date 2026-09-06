@@ -30,7 +30,6 @@ dependencies:
   - generic-lens
   - parallel
   - primitive
-  - skew-list
   - time
 
 default-extensions:

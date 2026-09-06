@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 module Permutation
   ( PiGen,
     initPiGen,
@@ -9,6 +7,10 @@ module Permutation
     initSigmaGen,
     projChoices,
     ProjChoice (..),
+    permute0,
+    permute,
+    normalisePermute0,
+    normalisePermute,
   )
 where
 
@@ -184,7 +186,7 @@ projChoices SigmaGen {..} = unfoldr' step 0
           let remaining' = clearBit remaining i
               iso =
                 sigmaSwaps
-                  (if i == n - 1 then Comm else SigmaSwap)
+                  (if remaining `unsafeShiftR` (i + 1) == 0 then Comm else SigmaSwap)
                   (popCount (remaining .&. (bit i - 1)))
               (# name #) = indexSmallArray## names i
               proj = eval (level :>> env) (indexSmallArray projs i)
@@ -208,3 +210,71 @@ sigmaSwaps last = \case
     go = \case
       0 -> last
       n -> SigmaCongR (go (n - 1)) `Trans` SigmaSwap
+
+--------------------------------------------------------------------------------
+-- Permutation
+
+permute0 :: Term -> [(Term, Iso)]
+permute0 t = permute 0 (eval emptyEnv t)
+
+permute :: Level -> Value -> [(Term, Iso)]
+permute l = \case
+  VPi x a b -> permutePi l (initPiGen l (VPiArg x a b))
+  VSigma x a b -> permuteSigma l (initSigmaGen l (VSigmaArg x a b))
+  v -> pure $! quote l v // Refl
+
+permutePi :: Level -> PiGen -> [(Term, Iso)]
+permutePi l gen = do
+  DomChoice {..} <- domChoices gen
+  (a, ia) <- permute l dom
+  let v = transportInv ia (VVar l)
+  (b, ib) <- case next of
+    Left cod -> permute (l + 1) (cod v)
+    Right gen -> permutePi (l + 1) (gen v)
+  pure $! Pi name a b // iso <> piCongL ia <> piCongR ib
+
+permuteSigma :: Level -> SigmaGen -> [(Term, Iso)]
+permuteSigma l gen = do
+  ProjChoice {..} <- projChoices gen
+  (a, ia) <- permute l proj
+  let v = transportInv ia (VVar l)
+  (b, ib) <- case next of
+    Left last -> permute (l + 1) (last v)
+    Right gen -> permuteSigma (l + 1) (gen v)
+  pure $! Sigma name a b // iso <> sigmaCongL ia <> sigmaCongR ib
+
+--------------------------------------------------------------------------------
+-- Normalisation + Permutation
+
+normalisePermute0 :: Term -> [(Term, Iso)]
+normalisePermute0 t = normalisePermute 0 (eval emptyEnv t)
+
+normalisePermute :: Level -> Value -> [(Term, Iso)]
+normalisePermute l = \case
+  VPi x a b -> do
+    let (pi, i) = curryAll l (VPiArg x a b)
+    map (fmap (i <>)) $ normalisePermutePi l (initPiGen l (evalPi (idEnv l) pi))
+  VSigma x a b -> do
+    let (sigma, i) = assocAll l (VSigmaArg x a b)
+    map (fmap (i <>)) $ normalisePermuteSigma l (initSigmaGen l (evalSigma (idEnv l) sigma))
+  v -> pure $! quote l v // Refl
+
+normalisePermutePi :: Level -> PiGen -> [(Term, Iso)]
+normalisePermutePi l gen = do
+  DomChoice {..} <- domChoices gen
+  (a, ia) <- normalisePermute l dom
+  let v = transportInv ia (VVar l)
+  (b, ib) <- case next of
+    Left cod -> normalisePermute (l + 1) (cod v)
+    Right gen -> normalisePermutePi (l + 1) (gen v)
+  pure $! Pi name a b // iso <> piCongL ia <> piCongR ib
+
+normalisePermuteSigma :: Level -> SigmaGen -> [(Term, Iso)]
+normalisePermuteSigma l gen = do
+  ProjChoice {..} <- projChoices gen
+  (a, ia) <- normalisePermute l proj
+  let v = transportInv ia (VVar l)
+  (b, ib) <- case next of
+    Left last -> normalisePermute (l + 1) (last v)
+    Right gen -> normalisePermuteSigma (l + 1) (gen v)
+  pure $! Sigma name a b // iso <> sigmaCongL ia <> sigmaCongR ib

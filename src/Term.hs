@@ -23,6 +23,8 @@ type Typ = Term
 
 data PiArg = PiArg Name Typ Typ
 
+data SigmaArg = SigmaArg Name Typ Typ
+
 instance HasField "_1" Term Term where
   getField = Fst
   {-# INLINE getField #-}
